@@ -228,8 +228,9 @@ export function Workspace() {
   if (loading)
     return (
       <div className="boot">
-        <img src="/mark.svg" width="42" alt="EasySolve" />
-        <div className="skeleton" />
+        <div className="loading-logo" aria-label="EasySolve is loading">
+          <img src="/easysolve-logo.svg" alt="EasySolve" />
+        </div>
         <p>Opening your workspace…</p>
       </div>
     );
@@ -272,9 +273,11 @@ export function Workspace() {
           }}
         >
           <img src="/mark.svg" width="31" height="31" alt="" />
-          <span>
-            EasySolve<span className="brand-dot">.</span>
-          </span>
+          <img
+            className="brand-wordmark"
+            src="/easysolve-logo.svg"
+            alt="EasySolve"
+          />
         </a>
         <button className="workspace-picker" onClick={() => go("/account")}>
           <span className="avatar small">
@@ -987,8 +990,11 @@ function Auth({
     <div className="auth-page">
       <div className="auth-story">
         <a className="brand" href="/">
-          <img src="/mark.svg" width="35" alt="" />
-          EasySolve<span className="brand-dot">.</span>
+          <img
+            className="auth-wordmark"
+            src="/easysolve-logo.svg"
+            alt="EasySolve"
+          />
         </a>
         <div>
           <span className="eyebrow">LESS FRICTION. MORE CONTRIBUTION.</span>

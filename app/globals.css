@@ -238,6 +238,14 @@ aside {
   letter-spacing: -1.2px;
   padding: 0 11px 27px;
 }
+.brand-wordmark {
+  width: 128px;
+  height: auto;
+}
+.auth-wordmark {
+  width: 166px;
+  height: auto;
+}
 .brand-dot {
   color: var(--accent);
 }
@@ -1378,33 +1386,50 @@ dialog .field {
   flex-direction: column;
   gap: 22px;
 }
+.loading-logo {
+  width: min(224px, calc(100vw - 64px));
+  position: relative;
+  animation: logo-rise 1.35s cubic-bezier(0.16, 1, 0.3, 1) infinite alternate;
+}
+.loading-logo::after {
+  content: "";
+  position: absolute;
+  inset: -7px -12px;
+  border: 1px solid #9b8cff55;
+  border-radius: 20px;
+  animation: logo-orbit 1.35s ease-in-out infinite;
+}
+.loading-logo img {
+  display: block;
+  width: 100%;
+  height: auto;
+  position: relative;
+  z-index: 1;
+}
+@keyframes logo-rise {
+  from {
+    transform: translateY(4px) scale(0.97);
+    filter: drop-shadow(0 0 0 #9b8cff00);
+  }
+  to {
+    transform: translateY(-3px) scale(1);
+    filter: drop-shadow(0 13px 20px #9b8cff3d);
+  }
+}
+@keyframes logo-orbit {
+  0%,
+  100% {
+    opacity: 0.2;
+    transform: scaleX(0.94);
+  }
+  50% {
+    opacity: 0.9;
+    transform: scaleX(1.04);
+  }
+}
 .boot p {
   font-size: 12px;
   color: var(--muted);
-}
-.skeleton {
-  height: 3px;
-  width: 130px;
-  border-radius: 5px;
-  background: var(--accent-bg);
-  position: relative;
-  overflow: hidden;
-}
-.skeleton:after {
-  content: "";
-  position: absolute;
-  background: var(--accent);
-  width: 40%;
-  height: 100%;
-  animation: skeleton 1.5s infinite;
-}
-@keyframes skeleton {
-  from {
-    left: -40%;
-  }
-  to {
-    left: 100%;
-  }
 }
 .loading-state {
   padding: 50px;
@@ -2225,6 +2250,7 @@ progress::-webkit-progress-value {
   padding-left: 9px;
 }
 .collapsed .brand > span,
+.collapsed .brand-wordmark,
 .collapsed .workspace-picker,
 .collapsed .nav-group > p,
 .collapsed nav a > span,
@@ -2603,7 +2629,7 @@ progress::-webkit-progress-value {
     display: none;
   }
   .auth-story > .brand {
-    font-size: 23px;
+    padding-bottom: 0;
   }
   .auth-form {
     padding: 30px 25px 60px;
