@@ -1,41 +1,41 @@
 :root {
-  --bg: #10110f;
-  --surface: #181a16;
-  --surface2: #20231d;
-  --surface3: #292d25;
-  --border: #353a30;
-  --text: #f8f7f0;
-  --muted: #afb4a7;
-  --faint: #7b8377;
-  --accent: #d5ff54;
-  --accent-bg: #2a3511;
-  --accent-ink: #172100;
+  --bg: #121114;
+  --surface: #191a17;
+  --surface2: #222027;
+  --surface3: #2b2735;
+  --border: #3c3548;
+  --text: #faf9f2;
+  --muted: #c0bac8;
+  --faint: #928a9d;
+  --accent: #9b8cff;
+  --accent-bg: #2d2746;
+  --accent-ink: #191a17;
   --red: #ff9d9d;
   --amber: #f2cf72;
-  --sidebar: #131510;
+  --sidebar: #151419;
   --shadow: 0 18px 50px #0000003d;
   --radius-lg: 20px;
   --radius-md: 12px;
-  --canvas-glow: #d5ff5412;
+  --canvas-glow: #9b8cff18;
   color-scheme: dark;
 }
 :root[data-theme="light"] {
-  --bg: #f5f3ea;
-  --surface: #fffdf7;
-  --surface2: #f4f1e7;
-  --surface3: #ebe7da;
-  --border: #ded9c9;
-  --text: #1b1d17;
-  --muted: #696e63;
-  --faint: #8b9085;
-  --accent: #6941d9;
-  --accent-bg: #eee9ff;
+  --bg: #f7f5fa;
+  --surface: #fffdfb;
+  --surface2: #f1edf8;
+  --surface3: #e6e0f0;
+  --border: #ddd5e8;
+  --text: #191a17;
+  --muted: #686274;
+  --faint: #928a9d;
+  --accent: #7865ef;
+  --accent-bg: #ece8ff;
   --accent-ink: #ffffff;
   --red: #bd4141;
   --amber: #946d19;
-  --sidebar: #eeeadf;
+  --sidebar: #eeeaf4;
   --shadow: 0 18px 50px #3c362012;
-  --canvas-glow: #6941d90d;
+  --canvas-glow: #9b8cff14;
   color-scheme: light;
 }
 * {
@@ -276,9 +276,9 @@ aside {
   margin-top: 4px;
 }
 .avatar {
-  border: 1px solid #a5b1f14d;
-  background: #2e3447;
-  color: #c4cbed;
+  border: 1px solid #9b8cff4d;
+  background: #302948;
+  color: #e5e0ff;
   border-radius: 50%;
   width: 31px;
   height: 31px;
@@ -532,7 +532,7 @@ main {
 .banner-icon {
   width: 56px;
   height: 65px;
-  border: 1px solid #67c29c38;
+  border: 1px solid #9b8cff38;
   border-radius: 17px;
   background: var(--accent-bg);
   color: var(--accent);
@@ -586,7 +586,7 @@ main {
   justify-content: center;
 }
 .flow-graphic div:nth-of-type(2) {
-  border-color: #6cdeb049;
+  border-color: #9b8cff49;
   color: var(--accent);
   background: var(--accent-bg);
 }
@@ -687,7 +687,7 @@ main {
 .check-ring {
   width: 42px;
   height: 42px;
-  border: 1px solid #6cdeb033;
+  border: 1px solid #9b8cff33;
   border-radius: 50%;
   color: var(--accent);
   background: var(--accent-bg);
@@ -860,7 +860,7 @@ footer img {
 .badge.green {
   color: var(--accent);
   background: var(--accent-bg);
-  border-color: #6cdeb028;
+  border-color: #9b8cff28;
 }
 .badge.red {
   color: var(--red);
@@ -902,7 +902,7 @@ footer img {
 .row-icon.emerald {
   color: var(--accent);
   background: var(--accent-bg);
-  border-color: #6cdeb025;
+  border-color: #9b8cff25;
 }
 .work-row > div:nth-child(2) {
   flex: 1;
@@ -1315,7 +1315,7 @@ dialog .field {
 }
 .confirmation-box {
   padding: 20px;
-  border: 1px solid #6cdeb038;
+  border: 1px solid #9b8cff38;
   background: var(--accent-bg);
   border-radius: 6px;
   margin: 20px 0;
@@ -1519,7 +1519,7 @@ dialog .field {
 }
 .auth-pills span:nth-of-type(2) {
   color: var(--accent);
-  border-color: #6cdeb033;
+  border-color: #9b8cff33;
 }
 .auth-form {
   display: flex;
@@ -1594,7 +1594,7 @@ dialog .field {
 .ai-mark {
   height: 65px;
   width: 65px;
-  border: 1px solid #6cdeb033;
+  border: 1px solid #9b8cff33;
   border-radius: 17px;
   background: var(--accent-bg);
   color: var(--accent);
@@ -1669,7 +1669,7 @@ dialog .field {
   box-shadow: 0 15px 40px #00000012;
 }
 .composer:focus-within {
-  border-color: #6cdeb070;
+  border-color: #9b8cff70;
 }
 .composer textarea {
   padding: 0;
@@ -1962,7 +1962,7 @@ dialog .field {
 .language-picker > button.selected {
   background: var(--accent-bg);
   color: var(--accent);
-  border-color: #6cdeb050;
+  border-color: #9b8cff50;
 }
 .application-row {
   display: flex;
@@ -2124,7 +2124,7 @@ dialog .field {
   cursor: pointer;
 }
 .radio-cards label.selected {
-  border-color: #6cdeb055;
+  border-color: #9b8cff55;
   background: var(--accent-bg);
 }
 .radio-cards label > div {
@@ -2142,7 +2142,7 @@ dialog .field {
 .default-tag {
   font-size: 9px;
   color: var(--accent);
-  border: 1px solid #6cdeb040;
+  border: 1px solid #9b8cff40;
   border-radius: 4px;
   padding: 3px 6px;
 }
