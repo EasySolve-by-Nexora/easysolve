@@ -32,7 +32,8 @@ cover uninterrupted operation for a full month, even when waiting for work; see
 Sign in with `npx vercel login`, link the intended project with `npx vercel link`,
 and configure production environment variables through Vercel's environment settings.
 Set `DATABASE_URL`, `TOKEN_ENCRYPTION_KEY`, `APP_URL` (the exact production HTTPS
-origin), `COOKIE_SECURE=true`, and the selected provider's configuration from
+origin), `COOKIE_SECURE=true`, `TRUST_PROXY=true` (required; Vercel's edge replaces
+`X-Forwarded-For` with the client IP), and the selected provider's configuration from
 `.env.example`. Configure `ADMIN_ORIGIN` only when using a separate admin origin.
 Never upload the local `.env` file or print secret values.
 
@@ -76,12 +77,13 @@ Set `APP_URL` to the exact HTTPS origin. Keep `COOKIE_SECURE=true`. `TRUST_PROXY
 - If sandbox creation fails: run `docker info`, then `docker build -t easysolve-sandbox:local sandbox`. The worker must have Docker access, and the configured image must exist.
 - If tests cannot run: the default sandbox is offline and includes Node, Git, and Python. It has no repository dependencies. Supply a vetted image for additional preinstalled tools; do not give the sandbox internet access or credentials to make tests appear successful.
 - If publication fails after fork creation: GitHub may still be preparing the fork, or the token cannot access it. Correct permissions and retry the failed publication job through run approval. Inspect any existing branch rather than deleting it blindly.
+- If sign-in, sign-up, recovery or reset return 503 "Authentication is temporarily unavailable": production requires `TRUST_PROXY=true` and a client IP in `X-Forwarded-For`. Set it only behind a proxy that overwrites that header, then restart the web service. `npm run doctor` reports this, and the server logs the reason.
 - If writes return 403 Origin rejected: correct `APP_URL` and restart both services.
 - If a token becomes unreadable: restore the matching encryption key or replace the credential through Account. Existing plaintext tokens are never recoverable in the UI.
 
 ## Account recovery
 
-Configure `RECOVERY_WEBHOOK_URL` and `RECOVERY_WEBHOOK_SECRET` with a trusted email delivery adapter. EasySolve POSTs `{email,url}` with `Authorization: Bearer <secret>`. Return 2xx only after accepting delivery. The adapter must restrict and authenticate callers, use an approved sender, and avoid logging recovery URLs. Links expire after 30 minutes and invalidate all sessions when redeemed. Without the adapter, recovery reports setup required rather than pretending an email was sent. Keep operator access to database backups; do not manually set weak passwords.
+Configure `RECOVERY_WEBHOOK_URL` and `RECOVERY_WEBHOOK_SECRET` with a trusted email delivery adapter. EasySolve POSTs `{email,url}` with `Authorization: Bearer <secret>`. Return 2xx only after accepting delivery. The adapter must restrict and authenticate callers, use an approved sender, and avoid logging recovery URLs. Links expire after 30 minutes and invalidate all sessions when redeemed. Without the adapter, no email is sent and the failure is written to the server log; the user-facing response is deliberately identical for every address so it cannot reveal which accounts exist. Check the logs after configuring recovery. Keep operator access to database backups; do not manually set weak passwords.
 
 ## Billing
 

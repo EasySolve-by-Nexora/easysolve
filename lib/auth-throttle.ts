@@ -70,7 +70,11 @@ export async function throttleAuth(
       );
     return;
   }
-  await rateLimit(`auth:ip:${ip}`, envLimit("AUTH_IP_LIMIT_PER_MINUTE", 10), 60);
+  await rateLimit(
+    `auth:ip:${ip}`,
+    envLimit("AUTH_IP_LIMIT_PER_MINUTE", 10),
+    60,
+  );
   if (account)
     await rateLimit(
       `auth:acct:${account}`,

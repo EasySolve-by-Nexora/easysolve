@@ -72,6 +72,9 @@ Copy the documented names in [.env.example](.env.example); never commit `.env`.
 | `RECOVERY_WEBHOOK_URL`       | Optional email delivery adapter URL; receives authenticated POST `{email,url}`            |
 | `RECOVERY_WEBHOOK_SECRET`    | Bearer secret for the recovery adapter                                                    |
 | `COOKIE_SECURE`              | Defaults true for production; false only for local HTTP production-build tests            |
+| `TRUST_PROXY`                | Required `true` in production behind a proxy that overwrites `X-Forwarded-For`; else auth returns 503 |
+| `AUTH_IP_LIMIT_PER_MINUTE`, `AUTH_ACCOUNT_LIMIT_PER_15_MINUTES` | Sign-in/sign-up throttles per trusted IP and per hashed email (defaults 10, 10) |
+| `RECOVERY_IP_LIMIT_PER_MINUTE`, `RECOVERY_ACCOUNT_LIMIT_PER_HOUR` | Recovery throttles per trusted IP and per hashed email (defaults 5, 3) |
 
 Price estimates are configured in **Run settings** as dollars per million input/cached/output tokens. They are explicitly estimates, not billing charges. User token allowances have configurable UTC reset days (1–28) and hours in Run settings. Server plan entitlements reset on the first day of each UTC calendar month; changing a user reset cannot bypass that ceiling. User settings may lower plan ceilings but cannot raise server entitlements. Background jobs wait for allowance reset instead of becoming permanently failed.
 

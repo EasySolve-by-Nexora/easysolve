@@ -279,15 +279,33 @@ it("limits one account across many trusted IPs without storing the raw email", a
   const target = `Victim-${crypto.randomUUID()}@Example.test`;
   for (let attempt = 0; attempt < 10; attempt++)
     expect(
-      (await withIp("login", { email: target, password: "x" }, `198.51.100.${attempt}`)).status,
+      (
+        await withIp(
+          "login",
+          { email: target, password: "x" },
+          `198.51.100.${attempt}`,
+        )
+      ).status,
     ).toBe(401);
   // Same account, brand-new IP, different letter case: still limited.
   expect(
-    (await withIp("login", { email: target.toLowerCase(), password: "x" }, "203.0.113.200")).status,
+    (
+      await withIp(
+        "login",
+        { email: target.toLowerCase(), password: "x" },
+        "203.0.113.200",
+      )
+    ).status,
   ).toBe(429);
   // A different account from a fresh IP is unaffected, so there is no global lock.
   expect(
-    (await withIp("login", { email: `other-${crypto.randomUUID()}@example.test`, password: "x" }, "203.0.113.201")).status,
+    (
+      await withIp(
+        "login",
+        { email: `other-${crypto.randomUUID()}@example.test`, password: "x" },
+        "203.0.113.201",
+      )
+    ).status,
   ).toBe(401);
   const keys = (await rateKeys("auth:")).join(" ");
   expect(keys).not.toContain("victim");
@@ -298,17 +316,34 @@ it("limits one trusted IP across many accounts", async () => {
   await db.rateLimit.deleteMany({ where: { key: { startsWith: "auth:" } } });
   for (let attempt = 0; attempt < 10; attempt++)
     expect(
-      (await withIp("login", { email: `ip-${attempt}-${crypto.randomUUID()}@example.test`, password: "x" }, "192.0.2.50")).status,
+      (
+        await withIp(
+          "login",
+          {
+            email: `ip-${attempt}-${crypto.randomUUID()}@example.test`,
+            password: "x",
+          },
+          "192.0.2.50",
+        )
+      ).status,
     ).toBe(401);
   expect(
-    (await withIp("login", { email: `ip-x-${crypto.randomUUID()}@example.test`, password: "x" }, "192.0.2.50")).status,
+    (
+      await withIp(
+        "login",
+        { email: `ip-x-${crypto.randomUUID()}@example.test`, password: "x" },
+        "192.0.2.50",
+      )
+    ).status,
   ).toBe(429);
   await db.rateLimit.deleteMany({ where: { key: { startsWith: "auth:" } } });
 });
 it("refuses authentication in production unless a trusted proxy is configured", async () => {
   vi.stubEnv("NODE_ENV", "production");
   vi.stubEnv("TRUST_PROXY", "");
-  expect((await withIp("login", { email, password: "x" }, "192.0.2.60")).status).toBe(503);
+  expect(
+    (await withIp("login", { email, password: "x" }, "192.0.2.60")).status,
+  ).toBe(503);
   vi.stubEnv("TRUST_PROXY", "true");
   // Trusted proxy mode without a client IP header is a proxy misconfiguration.
   const noHeader = await api(
@@ -320,7 +355,9 @@ it("refuses authentication in production unless a trusted proxy is configured", 
     ["auth", "login"],
   );
   expect(noHeader.status).toBe(503);
-  expect((await withIp("login", { email, password: "x" }, "192.0.2.61")).status).toBe(401);
+  expect(
+    (await withIp("login", { email, password: "x" }, "192.0.2.61")).status,
+  ).toBe(401);
   vi.stubEnv("NODE_ENV", "test");
   await db.rateLimit.deleteMany({ where: { key: { startsWith: "auth:" } } });
 });
@@ -329,19 +366,34 @@ it("returns the same recovery response for unknown, known and undeliverable acco
   const original = process.env.RECOVERY_WEBHOOK_URL;
   delete process.env.RECOVERY_WEBHOOK_URL; // delivery unconfigured
   const known = await withIp("recover", { email }, "192.0.2.70");
-  const unknown = await withIp("recover", { email: `nobody-${crypto.randomUUID()}@example.test` }, "192.0.2.71");
+  const unknown = await withIp(
+    "recover",
+    { email: `nobody-${crypto.randomUUID()}@example.test` },
+    "192.0.2.71",
+  );
   expect(known.status).toBe(200);
   expect(unknown.status).toBe(200);
   expect(await known.json()).toEqual(await unknown.json());
   // Per-email limit (3/hour) applies regardless of the source IP.
   const target = `limited-${crypto.randomUUID()}@example.test`;
   for (let attempt = 0; attempt < 3; attempt++)
-    expect((await withIp("recover", { email: target }, `192.0.2.${100 + attempt}`)).status).toBe(200);
-  expect((await withIp("recover", { email: target }, "192.0.2.200")).status).toBe(429);
+    expect(
+      (await withIp("recover", { email: target }, `192.0.2.${100 + attempt}`))
+        .status,
+    ).toBe(200);
+  expect(
+    (await withIp("recover", { email: target }, "192.0.2.200")).status,
+  ).toBe(429);
   // No single global recovery bucket: many different accounts and IPs still work.
   for (let attempt = 0; attempt < 8; attempt++)
     expect(
-      (await withIp("recover", { email: `many-${attempt}-${crypto.randomUUID()}@example.test` }, `198.18.0.${attempt}`)).status,
+      (
+        await withIp(
+          "recover",
+          { email: `many-${attempt}-${crypto.randomUUID()}@example.test` },
+          `198.18.0.${attempt}`,
+        )
+      ).status,
     ).toBe(200);
   expect((await rateKeys("recover:")).join(" ")).not.toContain("@");
   if (original) process.env.RECOVERY_WEBHOOK_URL = original;
