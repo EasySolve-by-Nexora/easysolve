@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { randomBytes } from "node:crypto";
 import { db } from "../db";
 import { throttleAuth } from "../auth-throttle";
+import { sendPasswordResetEmail, sendWelcomeEmail } from "../email";
 import { hash, HttpError, session } from "../security";
 import type { RouteContext } from "./types";
 import {
@@ -36,6 +37,19 @@ export async function handleAuth({
           password: await bcrypt.hash(input.password, 12),
         },
       });
+      try {
+        await sendWelcomeEmail({
+          userId: u.id,
+          email: u.email,
+          name: u.name,
+        });
+      } catch {
+        await db.user.delete({ where: { id: u.id } });
+        throw new HttpError(
+          503,
+          "Welcome email delivery is unavailable. Please try again shortly.",
+        );
+      }
       await session(u.id);
       return json({ ok: true });
     }
@@ -62,31 +76,42 @@ export async function handleAuth({
     // delivery worked, so this endpoint cannot be used to enumerate accounts.
     // Operators see delivery problems in server logs instead.
     if (!u) return generic;
+    let resetId: string | undefined;
     try {
-      if (!process.env.RECOVERY_WEBHOOK_URL || !process.env.APP_URL)
-        throw new Error("RECOVERY_WEBHOOK_URL or APP_URL is not configured");
+      if (!process.env.APP_URL) throw new Error("APP_URL is not configured");
       const token = randomBytes(32).toString("base64url");
+      resetId = hash(token);
       await db.reset.create({
         data: {
-          id: hash(token),
+          id: resetId,
           userId: u.id,
           expiresAt: new Date(Date.now() + 1800000),
         },
       });
-      const sent = await fetch(process.env.RECOVERY_WEBHOOK_URL, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${process.env.RECOVERY_WEBHOOK_SECRET ?? ""}`,
-        },
-        body: JSON.stringify({
+      const resetUrl = `${process.env.APP_URL}/?reset=${token}`;
+      if (process.env.RESEND_API_KEY) {
+        await sendPasswordResetEmail({
           email: u.email,
-          url: `${process.env.APP_URL}/?reset=${token}`,
-        }),
-        signal: AbortSignal.timeout(10000),
-      });
-      if (!sent.ok) throw new Error(`Recovery webhook returned ${sent.status}`);
+          url: resetUrl,
+          tokenHash: resetId,
+        });
+      } else if (process.env.RECOVERY_WEBHOOK_URL) {
+        const sent = await fetch(process.env.RECOVERY_WEBHOOK_URL, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${process.env.RECOVERY_WEBHOOK_SECRET ?? ""}`,
+          },
+          body: JSON.stringify({ email: u.email, url: resetUrl }),
+          signal: AbortSignal.timeout(10000),
+        });
+        if (!sent.ok) throw new Error(`Recovery webhook returned ${sent.status}`);
+      } else {
+        throw new Error("No account recovery email provider is configured");
+      }
     } catch (error) {
+      if (resetId)
+        await db.reset.delete({ where: { id: resetId } }).catch(() => undefined);
       console.error("Account recovery delivery failed", {
         reason: error instanceof Error ? error.message : "unknown",
       });

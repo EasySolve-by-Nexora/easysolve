@@ -83,7 +83,7 @@ Set `APP_URL` to the exact HTTPS origin. Keep `COOKIE_SECURE=true`. `TRUST_PROXY
 
 ## Account recovery
 
-Configure `RECOVERY_WEBHOOK_URL` and `RECOVERY_WEBHOOK_SECRET` with a trusted email delivery adapter. EasySolve POSTs `{email,url}` with `Authorization: Bearer <secret>`. Return 2xx only after accepting delivery. The adapter must restrict and authenticate callers, use an approved sender, and avoid logging recovery URLs. Links expire after 30 minutes and invalidate all sessions when redeemed. Without the adapter, no email is sent and the failure is written to the server log; the user-facing response is deliberately identical for every address so it cannot reveal which accounts exist. Check the logs after configuring recovery. Keep operator access to database backups; do not manually set weak passwords.
+Configure `RESEND_API_KEY` as a sending-only Resend key restricted to `nexoratech.works`. EasySolve sends welcome and password-reset messages from `EasySolve <easysolve@nexoratech.works>`; the emails use the product logo and reset links expire after 30 minutes. Keep `APP_URL` set to the public HTTPS origin so reset links are valid. `RECOVERY_WEBHOOK_URL` and `RECOVERY_WEBHOOK_SECRET` remain a legacy fallback only when no Resend key is configured. Recovery always returns the same response for every address and logs provider failures instead of exposing them. Keep operator access to database backups; do not manually set weak passwords.
 
 ## Billing
 
