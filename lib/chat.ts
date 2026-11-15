@@ -5,7 +5,7 @@ import { chatTools } from "./chat-tools";
 import { db } from "./db";
 import { syncIssues } from "./github";
 import { repoName } from "./policy";
-import { startRunsDetailed } from "./queue";
+import { noRunsMessage, startRunsDetailed } from "./queue";
 import { HttpError } from "./security";
 // Tools expose owned data. Consequential actions are returned as previews, never executed by model text.
 export async function chat(
@@ -239,10 +239,7 @@ export async function chatAction(
     // Never report success when nothing was queued (allowance, job limit, or
     // ineligible issues); surface the server's reasons instead.
     if (!started.runs.length)
-      throw new HttpError(
-        409,
-        `No runs were started: ${[...new Set(started.skipped.map((s) => s.reason))].join("; ") || "no eligible issues"}`,
-      );
+      throw new HttpError(409, noRunsMessage(started.skipped));
     result = started.runs;
   } else {
     const run = await db.run.findFirst({

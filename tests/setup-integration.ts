@@ -1,8 +1,12 @@
 import { beforeAll } from "vitest";
 import { db } from "../lib/db";
 
-// Unproxied auth requests share one throttle key. Start every test file with a
+// Auth requests without a forwarded IP share one development key. Start every test file with a
 // clean bucket so earlier files cannot exhaust it and cause spurious 429s.
 beforeAll(async () => {
-  await db.rateLimit.deleteMany({ where: { key: { startsWith: "auth:" } } });
+  await db.rateLimit.deleteMany({
+    where: {
+      OR: [{ key: { startsWith: "auth:" } }, { key: { startsWith: "recover:" } }],
+    },
+  });
 });

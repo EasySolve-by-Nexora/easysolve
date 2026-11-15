@@ -7,6 +7,9 @@ export default defineConfig({
   use: {
     baseURL: process.env.PLAYWRIGHT_BASE_URL || "http://localhost:3000",
     trace: "retain-on-failure",
+    // Production auth requires a trusted-proxy client IP header; the tests play
+    // the role of that proxy.
+    extraHTTPHeaders: { "X-Forwarded-For": "127.0.0.1" },
   },
   projects: [
     { name: "desktop", use: { ...devices["Desktop Chrome"] } },

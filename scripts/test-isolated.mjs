@@ -41,6 +41,11 @@ try {
       ...env,
       APP_URL: "http://localhost:3000",
       COOKIE_SECURE: "false",
+      TRUST_PROXY: "true",
+      AUTH_IP_LIMIT_PER_MINUTE: "1000",
+      AUTH_ACCOUNT_LIMIT_PER_15_MINUTES: "1000",
+      RECOVERY_IP_LIMIT_PER_MINUTE: "1000",
+      RECOVERY_ACCOUNT_LIMIT_PER_HOUR: "1000",
       NODE_ENV: "production",
     };
     const log = fs.openSync("/tmp/easysolve-browser-web.log", "w", 0o600);

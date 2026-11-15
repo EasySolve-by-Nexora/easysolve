@@ -293,8 +293,9 @@ it("reserves Basic allowance atomically per individual issue across API and conc
   expect((await entitlementSummary(basic)).reserved).toBe(1);
   // The API reports exhausted allowance as skipped issues instead of an error.
   const exhausted = await call("runs", { issueIds: [a.id, b.id] });
-  expect(exhausted.status).toBe(200);
+  expect(exhausted.status).toBe(409);
   const exhaustedBody = await exhausted.json();
+  expect(exhaustedBody.error).toContain("No runs were started");
   expect(exhaustedBody.runs).toHaveLength(0);
   expect(exhaustedBody.skipped).toHaveLength(2);
   await call(`runs/${run.id}/cancel`, {});
@@ -318,7 +319,7 @@ it("reserves Basic allowance atomically per individual issue across API and conc
   expect((await entitlementSummary(basic)).remaining).toBe(0);
   const fresh = await issue(basic);
   const fullApi = await call("runs", { issueIds: [fresh.id] });
-  expect(fullApi.status).toBe(200);
+  expect(fullApi.status).toBe(409);
   expect((await fullApi.json()).runs).toHaveLength(0);
   const bypass = await db.run.create({
     data: {
