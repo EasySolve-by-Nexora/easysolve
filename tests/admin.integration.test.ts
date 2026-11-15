@@ -5,7 +5,8 @@ import { afterAll, beforeAll, expect, it, vi } from "vitest";
 import { api } from "../lib/api";
 import { db } from "../lib/db";
 import { ai } from "../lib/ai";
-import { enqueue, startRuns } from "../lib/queue";
+import { chatAction } from "../lib/chat";
+import { enqueue, startRunsDetailed } from "../lib/queue";
 import { hash, requireAdmin, user } from "../lib/security";
 const { create } = vi.hoisted(() => ({ create: vi.fn() }));
 vi.mock("next/headers", () => ({ cookies: vi.fn() }));
@@ -432,6 +433,18 @@ it("paginates matching users without overlap and handles empty searches", async 
   ).toHaveLength(0);
 });
 
+async function limitedChatMessage(issueId: string) {
+  const message = await db.message.create({
+    data: {
+      userId: ordinaryId,
+      role: "assistant",
+      content: "Start the run?",
+      activity: [{ type: "confirmation", action: "start_run", ids: [issueId] }],
+    },
+  });
+  return message.id;
+}
+
 it("persists audited plan limits and enforces them against AI and job admission", async () => {
   await as(adminId);
   expect(
@@ -448,19 +461,32 @@ it("persists audited plan limits and enforces them against AI and job admission"
     "Plan token allowance exhausted",
   );
   expect(create).not.toHaveBeenCalled();
+  const identity = await db.identity.create({
+    data: {
+      userId: ordinaryId,
+      login: `limits-${ordinaryId}`,
+      githubAccountId: `limits-${ordinaryId}`,
+      token: "encrypted-fixture",
+    },
+  });
   const issue = await db.issue.create({
     data: {
       userId: ordinaryId,
-      identityId: "fixture",
+      identityId: identity.id,
       repo: "fixture/limits",
       number: 1,
       title: "Fixture",
       url: "https://example.test/issue",
     },
   });
-  await expect(startRuns(ordinaryId, [issue.id])).rejects.toThrow(
-    "Monthly job limit",
-  );
+  const attempt = await startRunsDetailed(ordinaryId, [issue.id]);
+  expect(attempt.runs).toEqual([]);
+  expect(attempt.skipped).toEqual([
+    { id: issue.id, reason: "Monthly job limit reached" },
+  ]);
+  await expect(
+    chatAction(ordinaryId, await limitedChatMessage(issue.id)),
+  ).rejects.toThrow("Monthly job limit");
   const audit = await db.adminAudit.findFirstOrThrow({
     where: { actorId: adminId, targetId: ordinaryId, action: "account.plan" },
   });

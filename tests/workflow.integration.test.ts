@@ -357,7 +357,7 @@ describe("durable issue → run → approval → PR workflow", () => {
   });
   it("keeps issue and job allowances separate for grouped and unlimited plans", async () => {
     const createWorkspace = async (
-      settings: Record<string, unknown>,
+      settings: Record<string, number>,
       planMaxJobs: number,
       pro = false,
     ) => {

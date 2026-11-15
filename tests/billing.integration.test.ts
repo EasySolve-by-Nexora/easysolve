@@ -89,7 +89,7 @@ async function user(role: "USER" | "ADMIN" = "USER") {
   actors.push(u.id);
   await db.identity.create({
     data: {
-      id: "fixture",
+      id: `fixture-${u.id}`,
       userId: u.id,
       login: "fixture",
       githubAccountId: `fixture-${crypto.randomUUID()}`,
@@ -139,7 +139,7 @@ async function issue(userId: string) {
   return db.issue.create({
     data: {
       userId,
-      identityId: "fixture",
+      identityId: `fixture-${userId}`,
       repo: "billing/project",
       number: ++serial,
       title: "Fix issue",
@@ -187,6 +187,12 @@ function transaction(invoice: any, overrides: any = {}) {
 }
 beforeAll(async () => {
   vi.stubEnv("TOKEN_ENCRYPTION_KEY", randomBytes(32).toString("base64"));
+  // POST /runs refuses to queue work without a recent worker heartbeat.
+  await db.workerHeartbeat.upsert({
+    where: { id: "billing-test-worker" },
+    create: { id: "billing-test-worker", lastSeen: new Date() },
+    update: { lastSeen: new Date() },
+  });
   owner = await user("ADMIN");
   basic = await user();
   other = await user();
@@ -231,6 +237,7 @@ afterAll(async () => {
     await db.adminBootstrap.delete({ where: { id: "owner" } });
   await db.paymentCursor.deleteMany({ where: { recipient: address } });
   await db.planVersion.deleteMany({ where: { actorId: owner } });
+  await db.workerHeartbeat.deleteMany({ where: { id: "billing-test-worker" } });
   await db.$disconnect();
   vi.unstubAllEnvs();
 });
@@ -271,16 +278,25 @@ it("reserves Basic allowance atomically per individual issue across API and conc
   const a = await issue(basic),
     b = await issue(basic);
   await login(basic);
-  expect((await call("runs", { issueIds: [a.id, b.id] })).status).toBe(403);
-  expect(await db.run.count({ where: { userId: basic } })).toBe(0);
+  // Concurrent starts must reserve atomically: the Basic allowance is one
+  // issue, so exactly one run is created and the other call starts nothing.
   const attempts = await Promise.allSettled([
     startRuns(basic, [a.id]),
     startRuns(basic, [b.id]),
   ]);
-  expect(attempts.filter((a) => a.status === "fulfilled")).toHaveLength(1);
+  expect(attempts.every((x) => x.status === "fulfilled")).toBe(true);
+  expect(
+    attempts.flatMap((x) => (x.status === "fulfilled" ? x.value : [])),
+  ).toHaveLength(1);
+  expect(await db.run.count({ where: { userId: basic } })).toBe(1);
   const run = await db.run.findFirstOrThrow({ where: { userId: basic } });
   expect((await entitlementSummary(basic)).reserved).toBe(1);
-  expect((await call("runs", { issueIds: [a.id, b.id] })).status).toBe(409);
+  // The API reports exhausted allowance as skipped issues instead of an error.
+  const exhausted = await call("runs", { issueIds: [a.id, b.id] });
+  expect(exhausted.status).toBe(200);
+  const exhaustedBody = await exhausted.json();
+  expect(exhaustedBody.runs).toHaveLength(0);
+  expect(exhaustedBody.skipped).toHaveLength(2);
   await call(`runs/${run.id}/cancel`, {});
   expect((await entitlementSummary(basic)).remaining).toBe(1);
   const otherIssue =
@@ -301,11 +317,13 @@ it("reserves Basic allowance atomically per individual issue across API and conc
   ).toEqual(at);
   expect((await entitlementSummary(basic)).remaining).toBe(0);
   const fresh = await issue(basic);
-  expect((await call("runs", { issueIds: [fresh.id] })).status).toBe(403);
+  const fullApi = await call("runs", { issueIds: [fresh.id] });
+  expect(fullApi.status).toBe(200);
+  expect((await fullApi.json()).runs).toHaveLength(0);
   const bypass = await db.run.create({
     data: {
       userId: basic,
-      identityId: "fixture",
+      identityId: `fixture-${basic}`,
       repo: "billing/project",
       issueIds: [fresh.id],
       title: "Bypass",
@@ -337,10 +355,12 @@ it("reserves Basic allowance atomically per individual issue across API and conc
     },
   });
   expect((await call("chat/confirm", { messageId: preview.id })).status).toBe(
-    403,
+    409,
   );
 });
 it("enforces four distinct Pro accounts under concurrent connections and replacement tokens", async () => {
+  // Start from zero identities so the limit under test is exactly four.
+  await db.identity.deleteMany({ where: { userId: other } });
   await db.user.update({
     where: { id: other },
     data: {
