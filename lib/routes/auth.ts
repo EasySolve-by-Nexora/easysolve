@@ -4,6 +4,7 @@ import { randomBytes } from "node:crypto";
 import { db } from "../db";
 import { throttleAuth } from "../auth-throttle";
 import { sendPasswordResetEmail, sendWelcomeEmail } from "../email";
+import { enqueue } from "../queue";
 import { hash, HttpError, session } from "../security";
 import type { RouteContext } from "./types";
 import {
@@ -37,19 +38,15 @@ export async function handleAuth({
           password: await bcrypt.hash(input.password, 12),
         },
       });
-      try {
-        await sendWelcomeEmail({
-          userId: u.id,
-          email: u.email,
-          name: u.name,
-        });
-      } catch {
-        await db.user.delete({ where: { id: u.id } });
-        throw new HttpError(
-          503,
-          "Welcome email delivery is unavailable. Please try again shortly.",
-        );
-      }
+      // Welcome mail must never make account creation unavailable. The durable
+      // worker retries it, and Resend's idempotency key prevents duplicates.
+      await enqueue(u.id, "welcome_email", `welcome:${u.id}`, {}).catch(
+        (error) =>
+          console.error("Could not queue welcome email", {
+            userId: u.id,
+            reason: error instanceof Error ? error.message : "unknown",
+          }),
+      );
       await session(u.id);
       return json({ ok: true });
     }
@@ -105,13 +102,16 @@ export async function handleAuth({
           body: JSON.stringify({ email: u.email, url: resetUrl }),
           signal: AbortSignal.timeout(10000),
         });
-        if (!sent.ok) throw new Error(`Recovery webhook returned ${sent.status}`);
+        if (!sent.ok)
+          throw new Error(`Recovery webhook returned ${sent.status}`);
       } else {
         throw new Error("No account recovery email provider is configured");
       }
     } catch (error) {
       if (resetId)
-        await db.reset.delete({ where: { id: resetId } }).catch(() => undefined);
+        await db.reset
+          .delete({ where: { id: resetId } })
+          .catch(() => undefined);
       console.error("Account recovery delivery failed", {
         reason: error instanceof Error ? error.message : "unknown",
       });

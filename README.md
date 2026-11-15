@@ -51,31 +51,31 @@ Browser setup: `npx playwright install --with-deps chromium`. Integration/browse
 
 Copy the documented names in [.env.example](.env.example); never commit `.env`.
 
-| Variable                     | Meaning                                                                                   |
-| ---------------------------- | ----------------------------------------------------------------------------------------- |
-| `DATABASE_URL`               | PostgreSQL connection string; production records, sessions, jobs, artifacts, usage        |
-| `POSTGRES_PASSWORD`          | Local Compose database password; change with `DATABASE_URL` for production                |
-| `APP_URL`                    | Exact browser origin, no trailing slash; CSRF and recovery links                          |
-| `RESEND_API_KEY`             | Resend sending-only key for welcome and password-reset emails                             |
-| `TOKEN_ENCRYPTION_KEY`       | Base64-encoded 32-byte AES-256-GCM key; `openssl rand -base64 32`                         |
-| `DEEPSEEK_API_KEY`           | Server-only key entered in the private root `.env`; shared by web and worker              |
-| `DEEPSEEK_MODEL`             | Default `deepseek-flash`; no fallback model                                               |
-| `DEEPSEEK_BASE_URL`          | Official `https://api.deepseek.com` only (optional `/v1` is accepted)                     |
-| `DEEPSEEK_THINKING`          | `disabled` by default; `enabled` retains private reasoning only in transient tool history |
-| `DEEPSEEK_TIMEOUT_MS`        | Streaming deadline, default and maximum 90000 ms                                          |
-| `AI_MAX_OUTPUT_TOKENS`       | Per-request output ceiling, default 6,000                                                 |
-| `PLAN_NAME`                  | Self-hosted plan label, default Personal                                                  |
-| `PLAN_MAX_JOBS`              | Server-enforced monthly job ceiling per user, default 50                                  |
-| `PLAN_MAX_TOKENS`            | Server-enforced monthly token ceiling per user, default 1,000,000                         |
-| `SANDBOX_IMAGE`              | Trusted locally built execution image, default `easysolve-sandbox:local`                  |
-| `WORKER_CONCURRENCY`         | Global active job ceiling, default 10; one worker dispatches jobs concurrently            |
-| `WORKER_ACCOUNT_CONCURRENCY` | Per-account active job ceiling, default 10                                                |
-| `RECOVERY_WEBHOOK_URL`       | Legacy optional recovery adapter; Resend is used whenever `RESEND_API_KEY` is configured  |
-| `RECOVERY_WEBHOOK_SECRET`    | Legacy adapter bearer secret                                                              |
-| `COOKIE_SECURE`              | Defaults true for production; false only for local HTTP production-build tests            |
-| `TRUST_PROXY`                | Required `true` in production behind a proxy that overwrites `X-Forwarded-For`; else auth returns 503 |
-| `AUTH_IP_LIMIT_PER_MINUTE`, `AUTH_ACCOUNT_LIMIT_PER_15_MINUTES` | Sign-in/sign-up throttles per trusted IP and per hashed email (defaults 10, 10) |
-| `RECOVERY_IP_LIMIT_PER_MINUTE`, `RECOVERY_ACCOUNT_LIMIT_PER_HOUR` | Recovery throttles per trusted IP and per hashed email (defaults 5, 3) |
+| Variable                                                          | Meaning                                                                                               |
+| ----------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| `DATABASE_URL`                                                    | PostgreSQL connection string; production records, sessions, jobs, artifacts, usage                    |
+| `POSTGRES_PASSWORD`                                               | Local Compose database password; change with `DATABASE_URL` for production                            |
+| `APP_URL`                                                         | Exact browser origin, no trailing slash; CSRF and recovery links                                      |
+| `RESEND_API_KEY`                                                  | Resend sending-only key for queued welcome and password-reset emails                                  |
+| `TOKEN_ENCRYPTION_KEY`                                            | Base64-encoded 32-byte AES-256-GCM key; `openssl rand -base64 32`                                     |
+| `DEEPSEEK_API_KEY`                                                | Server-only key entered in the private root `.env`; shared by web and worker                          |
+| `DEEPSEEK_MODEL`                                                  | Default `deepseek-flash`; no fallback model                                                           |
+| `DEEPSEEK_BASE_URL`                                               | Official `https://api.deepseek.com` only (optional `/v1` is accepted)                                 |
+| `DEEPSEEK_THINKING`                                               | `disabled` by default; `enabled` retains private reasoning only in transient tool history             |
+| `DEEPSEEK_TIMEOUT_MS`                                             | Streaming deadline, default and maximum 90000 ms                                                      |
+| `AI_MAX_OUTPUT_TOKENS`                                            | Per-request output ceiling, default 6,000                                                             |
+| `PLAN_NAME`                                                       | Self-hosted plan label, default Personal                                                              |
+| `PLAN_MAX_JOBS`                                                   | Server-enforced monthly job ceiling per user, default 50                                              |
+| `PLAN_MAX_TOKENS`                                                 | Server-enforced monthly token ceiling per user, default 1,000,000                                     |
+| `SANDBOX_IMAGE`                                                   | Trusted locally built execution image, default `easysolve-sandbox:local`                              |
+| `WORKER_CONCURRENCY`                                              | Global active job ceiling, default 10; one worker dispatches jobs concurrently                        |
+| `WORKER_ACCOUNT_CONCURRENCY`                                      | Per-account active job ceiling, default 10                                                            |
+| `RECOVERY_WEBHOOK_URL`                                            | Legacy optional recovery adapter; Resend is used whenever `RESEND_API_KEY` is configured              |
+| `RECOVERY_WEBHOOK_SECRET`                                         | Legacy adapter bearer secret                                                                          |
+| `COOKIE_SECURE`                                                   | Defaults true for production; false only for local HTTP production-build tests                        |
+| `TRUST_PROXY`                                                     | Required `true` in production behind a proxy that overwrites `X-Forwarded-For`; else auth returns 503 |
+| `AUTH_IP_LIMIT_PER_MINUTE`, `AUTH_ACCOUNT_LIMIT_PER_15_MINUTES`   | Sign-in/sign-up throttles per trusted IP and per hashed email (defaults 10, 10)                       |
+| `RECOVERY_IP_LIMIT_PER_MINUTE`, `RECOVERY_ACCOUNT_LIMIT_PER_HOUR` | Recovery throttles per trusted IP and per hashed email (defaults 5, 3)                                |
 
 Price estimates are configured in **Run settings** as dollars per million input/cached/output tokens. They are explicitly estimates, not billing charges. User token allowances have configurable UTC reset days (1–28) and hours in Run settings. Server plan entitlements reset on the first day of each UTC calendar month; changing a user reset cannot bypass that ceiling. User settings may lower plan ceilings but cannot raise server entitlements. Background jobs wait for allowance reset instead of becoming permanently failed.
 

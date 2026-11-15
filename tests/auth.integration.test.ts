@@ -72,6 +72,28 @@ it("authenticates an existing account with omitted or null signup-only fields wi
     (await db.user.findUniqueOrThrow({ where: { id: ids[0] } })).password,
   ).toBe(originalHash);
 });
+it("creates an account and queues welcome email without waiting for delivery", async () => {
+  vi.mocked(fetch).mockClear();
+  const signupEmail = `welcome-${crypto.randomUUID()}@example.test`;
+  const response = await call("signup", {
+    email: signupEmail,
+    name: "Welcome fixture",
+    password: "fixture-password-123",
+  });
+  expect(response.status).toBe(200);
+  const created = await db.user.findUniqueOrThrow({
+    where: { email: signupEmail },
+  });
+  ids.push(created.id);
+  expect(
+    await db.job.findUnique({ where: { key: `welcome:${created.id}` } }),
+  ).toMatchObject({
+    userId: created.id,
+    kind: "welcome_email",
+    status: "queued",
+  });
+  expect(fetch).not.toHaveBeenCalled();
+});
 it("does not let callers bypass auth throttling with forged forwarded IPs", async () => {
   await db.rateLimit.deleteMany({ where: { key: { startsWith: "auth:" } } });
   vi.stubEnv("TRUST_PROXY", "false");

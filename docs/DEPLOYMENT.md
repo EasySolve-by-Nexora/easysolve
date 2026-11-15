@@ -83,7 +83,7 @@ Set `APP_URL` to the exact HTTPS origin. Keep `COOKIE_SECURE=true`. `TRUST_PROXY
 
 ## Account recovery
 
-Configure `RESEND_API_KEY` as a sending-only Resend key restricted to `nexoratech.works`. EasySolve sends welcome and password-reset messages from `EasySolve <easysolve@nexoratech.works>`; the emails use the product logo and reset links expire after 30 minutes. Keep `APP_URL` set to the public HTTPS origin so reset links are valid. `RECOVERY_WEBHOOK_URL` and `RECOVERY_WEBHOOK_SECRET` remain a legacy fallback only when no Resend key is configured. Recovery always returns the same response for every address and logs provider failures instead of exposing them. Keep operator access to database backups; do not manually set weak passwords.
+Configure `RESEND_API_KEY` as a sending-only Resend key restricted to `nexoratech.works`. EasySolve sends welcome and password-reset messages from `EasySolve <easysolve@nexoratech.works>`; the emails use the product logo and reset links expire after 30 minutes. Signup queues welcome email for the durable worker, so a temporary email-provider failure never prevents account creation; delivery is retried up to three times and Resend idempotency prevents duplicates. Keep `APP_URL` set to the public HTTPS origin so reset links are valid. `RECOVERY_WEBHOOK_URL` and `RECOVERY_WEBHOOK_SECRET` remain a legacy fallback only when no Resend key is configured. Recovery always returns the same response for every address and logs provider failures instead of exposing them. Keep operator access to database backups; do not manually set weak passwords.
 
 ## Billing
 

@@ -15,6 +15,7 @@ import { claimJob, enqueue } from "../lib/queue";
 import { executeRun, publish } from "./agent";
 import { recordProviderRuntime } from "../lib/provider-runtime";
 import { HttpError } from "../lib/security";
+import { sendWelcomeEmail } from "../lib/email";
 const workerId = process.env.WORKER_ID || "worker:" + process.pid;
 const workerVersion =
   process.env.RELEASE_VERSION || process.env.VERCEL_GIT_COMMIT_SHA || "unknown";
@@ -142,15 +143,21 @@ async function processJob(job: Awaited<ReturnType<typeof claimJob>>) {
     });
     if (account.suspendedAt) throw new Error("Account suspended");
     const p = job.payload as {
-      runId: string;
-      identityId: string;
-      repositoryId: string;
+      runId?: string;
+      identityId?: string;
+      repositoryId?: string;
     };
-    if (job.kind === "run") await executeRun(job.userId, p.runId);
-    else if (job.kind === "publish") await publish(job.userId, p.runId);
+    if (job.kind === "run") await executeRun(job.userId, p.runId!);
+    else if (job.kind === "publish") await publish(job.userId, p.runId!);
     else if (job.kind === "repository_sync")
-      await syncRepositoryStats(job.userId, p.repositoryId);
-    else if (job.kind === "sync") await syncIssues(job.userId, p.identityId);
+      await syncRepositoryStats(job.userId, p.repositoryId!);
+    else if (job.kind === "sync") await syncIssues(job.userId, p.identityId!);
+    else if (job.kind === "welcome_email")
+      await sendWelcomeEmail({
+        userId: account.id,
+        email: account.email,
+        name: account.name,
+      });
     else throw Error("Unknown job kind");
     await db.job.updateMany({
       where: { id: job.id, status: "running", attempts: job.attempts },
@@ -231,16 +238,17 @@ async function processJob(job: Awaited<ReturnType<typeof claimJob>>) {
             ? e.retryAt
             : aiLimited
               ? new Date(Date.now() + 60000)
-            : new Date(Date.now() + job.attempts * 30000),
-        error: pauseRunForGithub || aiLimited
-          ? e.message
-          : allowance
-            ? "Allowance exhausted"
-            : githubLimited
-              ? e.message
-              : e instanceof Error
-                ? e.message.slice(0, 2000)
-                : "Job failed",
+              : new Date(Date.now() + job.attempts * 30000),
+        error:
+          pauseRunForGithub || aiLimited
+            ? e.message
+            : allowance
+              ? "Allowance exhausted"
+              : githubLimited
+                ? e.message
+                : e instanceof Error
+                  ? e.message.slice(0, 2000)
+                  : "Job failed",
       },
     });
     if (allowance && job.kind === "run")
