@@ -29,6 +29,7 @@ vi.mock("../worker/sandbox", () => ({
 vi.mock("next/headers", () => ({ cookies: vi.fn() }));
 let userId = "",
   otherId = "";
+const cleanupUserIds: string[] = [];
 let serial = 0;
 async function issue(repo = "test/project") {
   return db.issue.create({
@@ -54,6 +55,7 @@ beforeAll(async () => {
       },
     })
   ).id;
+  cleanupUserIds.push(userId);
   otherId = (
     await db.user.create({
       data: {
@@ -63,6 +65,7 @@ beforeAll(async () => {
       },
     })
   ).id;
+  cleanupUserIds.push(otherId);
   await db.identity.create({
     data: {
       id: "test-identity",
@@ -74,7 +77,7 @@ beforeAll(async () => {
   });
 });
 afterAll(async () => {
-  await db.user.deleteMany({ where: { id: { in: [userId, otherId] } } });
+  await db.user.deleteMany({ where: { id: { in: cleanupUserIds } } });
   await db.$disconnect();
 });
 beforeEach(() => {
@@ -351,6 +354,77 @@ describe("durable issue → run → approval → PR workflow", () => {
     if (before === undefined) delete process.env.PLAN_MAX_JOBS;
     else process.env.PLAN_MAX_JOBS = before;
     await db.user.update({ where: { id: userId }, data: { settings: {} } });
+  });
+  it("keeps issue and job allowances separate for grouped and unlimited plans", async () => {
+    const createWorkspace = async (
+      settings: Record<string, unknown>,
+      planMaxJobs: number,
+      pro = false,
+    ) => {
+      const account = await db.user.create({
+        data: {
+          email: `limits-${crypto.randomUUID()}@example.test`,
+          name: "Limits fixture",
+          password: "not-a-real-password",
+          settings,
+          planMaxJobs,
+          ...(pro
+            ? { membershipPlan: "pro", proLifetime: true }
+            : { issueLimitOverride: 100 }),
+        },
+      });
+      cleanupUserIds.push(account.id);
+      const identityId = `limits-${crypto.randomUUID()}`;
+      await db.identity.create({
+        data: {
+          id: identityId,
+          userId: account.id,
+          login: `limits-${crypto.randomUUID().slice(0, 8)}`,
+          githubAccountId: `limits-${crypto.randomUUID()}`,
+          token: "fixture-token",
+        },
+      });
+      const createIssue = (repo: string, number: number) =>
+        db.issue.create({
+          data: {
+            userId: account.id,
+            identityId,
+            repo,
+            number,
+            title: "Limit fixture",
+            url: `https://github.com/${repo}/issues/${number}`,
+          },
+        });
+      return { account, createIssue };
+    };
+
+    const grouped = await createWorkspace({}, 1);
+    const groupedIssues = await Promise.all(
+      [1, 2, 3, 4].map((number) =>
+        grouped.createIssue("test/group-limit", number),
+      ),
+    );
+    const groupedRuns = await startRuns(
+      grouped.account.id,
+      groupedIssues.map((item) => item.id),
+      { grouped: true },
+    );
+    expect(groupedRuns).toHaveLength(1);
+    expect(groupedRuns[0].issueIds).toHaveLength(4);
+
+    const unlimited = await createWorkspace({}, 1, true);
+    const first = await unlimited.createIssue("test/unlimited-limit", 1);
+    const second = await unlimited.createIssue("test/unlimited-limit", 2);
+    expect(await startRuns(unlimited.account.id, [first.id])).toHaveLength(1);
+    expect(await startRuns(unlimited.account.id, [second.id])).toEqual([]);
+
+    const userCap = await createWorkspace({ monthlyJobs: 1 }, 50);
+    const cappedFirst = await userCap.createIssue("test/user-job-limit", 1);
+    const cappedSecond = await userCap.createIssue("test/user-job-limit", 2);
+    expect(await startRuns(userCap.account.id, [cappedFirst.id])).toHaveLength(
+      1,
+    );
+    expect(await startRuns(userCap.account.id, [cappedSecond.id])).toEqual([]);
   });
 });
 

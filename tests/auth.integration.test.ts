@@ -28,6 +28,7 @@ async function call(action: string, body: unknown) {
 }
 beforeAll(async () => {
   vi.stubEnv("APP_URL", origin);
+  vi.stubEnv("TRUST_PROXY", "true");
   vi.mocked(cookies).mockResolvedValue({ set: setCookie } as any);
   email = `auth-${crypto.randomUUID()}@example.test`;
   originalHash = await bcrypt.hash("eight123", 4);
@@ -63,6 +64,40 @@ it("authenticates an existing account with omitted or null signup-only fields wi
   expect(
     (await db.user.findUniqueOrThrow({ where: { id: ids[0] } })).password,
   ).toBe(originalHash);
+});
+it("does not let callers bypass auth throttling with forged forwarded IPs", async () => {
+  vi.stubEnv("TRUST_PROXY", "false");
+  const password = "wrong-password";
+  for (let attempt = 0; attempt < 10; attempt++) {
+    const response = await api(
+      new Request(`${origin}/api/auth/login`, {
+        method: "POST",
+        headers: {
+          Origin: origin,
+          "Content-Type": "application/json",
+          "X-Forwarded-For": `forged-${attempt}`,
+        },
+        body: JSON.stringify({ email, password }),
+      }),
+      ["auth", "login"],
+    );
+    expect(response.status).toBe(401);
+  }
+  const blocked = await api(
+    new Request(`${origin}/api/auth/login`, {
+      method: "POST",
+      headers: {
+        Origin: origin,
+        "Content-Type": "application/json",
+        "X-Forwarded-For": "another-forged-ip",
+      },
+      body: JSON.stringify({ email, password }),
+    }),
+    ["auth", "login"],
+  );
+  expect(blocked.status).toBe(429);
+  await db.rateLimit.deleteMany({ where: { key: "auth:shared" } });
+  vi.stubEnv("TRUST_PROXY", "true");
 });
 it("keeps a valid session across requests, logs out explicitly, and does not delete it on backend failure", async () => {
   expect((await call("login", { email, password: "eight123" })).status).toBe(
@@ -111,10 +146,9 @@ it("rejects an expired session without changing the cookie", async () => {
     set: setCookie,
     delete: remove,
   } as any);
-  const response = await api(
-    new Request(`${origin}/api/bootstrap`),
-    ["bootstrap"],
-  );
+  const response = await api(new Request(`${origin}/api/bootstrap`), [
+    "bootstrap",
+  ]);
   expect(response.status).toBe(401);
   expect(remove).not.toHaveBeenCalled();
 });

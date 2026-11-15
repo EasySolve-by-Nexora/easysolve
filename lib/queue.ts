@@ -143,33 +143,43 @@ async function selectionPreview(
     eligible.push(issue);
   }
   const plan = await entitlementSummary(userId, tx);
-  const groupsToRun = options.grouped
+  const requestedGroups = options.grouped
     ? compatibleGroups(eligible)
     : eligible.map((i) => [i]);
-  const requested = groupsToRun.length;
+  const requested = requestedGroups.length;
   const monthly = await tx.run.count({
     where: { userId, createdAt: { gte: monthStart() } },
   });
+  // Issue allowance and job allowance measure different things. A grouped run
+  // can reserve up to four issues but still consumes one monthly job. An
+  // unlimited issue plan must never bypass the server or user job ceiling.
   const available = plan.unlimited
     ? null
-    : Math.max(
-        0,
-        Math.min(
-          plan.issueLimit - plan.successful - plan.reserved,
-          planLimits(account).jobs - monthly,
-        ),
-      );
-  if (available !== null && eligible.length > available)
+    : Math.max(0, plan.issueLimit - plan.successful - plan.reserved);
+  const jobLimit = Math.min(
+    planLimits(account).jobs,
+    settings(account.settings).monthlyJobs,
+  );
+  const availableJobs = Math.max(0, jobLimit - monthly);
+  const issueAllowed =
+    available === null ? eligible : eligible.slice(0, available);
+  if (available !== null && issueAllowed.length < eligible.length)
     skipped.push(
-      ...eligible.slice(available).map((i) => ({
+      ...eligible.slice(issueAllowed.length).map((i) => ({
         id: i.id,
-        reason: "Plan allowance or monthly job limit reached",
+        reason: "Issue allowance reached",
       })),
     );
-  const allowed = available === null ? eligible : eligible.slice(0, available);
-  const allowedGroups = options.grouped
-    ? compatibleGroups(allowed)
-    : allowed.map((i) => [i]);
+  const allowedGroups = (
+    options.grouped
+      ? compatibleGroups(issueAllowed)
+      : issueAllowed.map((i) => [i])
+  ).slice(0, availableJobs);
+  const allowed = allowedGroups.flat();
+  const allowedIds = new Set(allowed.map((i) => i.id));
+  for (const issue of issueAllowed)
+    if (!allowedIds.has(issue.id))
+      skipped.push({ id: issue.id, reason: "Monthly job limit reached" });
   return {
     selected: unique,
     eligible: allowed,

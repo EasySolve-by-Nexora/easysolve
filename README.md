@@ -1,5 +1,5 @@
-ther# EasySolve
-p
+# EasySolve
+
 **From issue to reviewed pull request.**
 
 A self-hosted GitHub coding-agent application with a Next.js interface, PostgreSQL persistence, a durable worker, the direct DeepSeek Chat Completions API, and isolated Docker execution. The interface includes contributor and maintainer workflows, original branding, dark/light themes, and responsive navigation. There are no simulated live issues, runs, usage figures, or provider connections.

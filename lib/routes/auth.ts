@@ -13,6 +13,18 @@ import {
 } from "../auth-input";
 const json = (data: unknown, status = 200) =>
   NextResponse.json(data, { status });
+
+function authRateLimitKey(request: Request) {
+  // Forwarded headers are client-controlled unless the reverse proxy strips
+  // and replaces them. Opt in only after configuring such a proxy; the shared
+  // fallback cannot be bypassed by inventing an IP address.
+  const forwarded =
+    process.env.TRUST_PROXY === "true"
+      ? request.headers.get("x-forwarded-for")?.split(",")[0]?.trim()
+      : undefined;
+  return `auth:${forwarded || "shared"}`;
+}
+
 export async function handleAuth({
   request,
   path,
@@ -22,10 +34,7 @@ export async function handleAuth({
   const route = path.join("/");
   const method = request.method;
   if (route === "auth/signup" || route === "auth/login") {
-    await rateLimit(
-      `auth:${request.headers.get("x-forwarded-for")?.split(",")[0] ?? "local"}`,
-      10,
-    );
+    await rateLimit(authRateLimitKey(request), 10);
     if (route === "auth/signup") {
       const input = parseAuthInput(signupSchema, body);
       if (await db.user.findUnique({ where: { email: input.email } }))

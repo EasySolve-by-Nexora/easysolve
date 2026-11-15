@@ -64,7 +64,7 @@ Use a supervisor (systemd, an orchestrator, or your process manager) to restart 
 
 Use a production PostgreSQL service with backups, TLS, restricted credentials, and a tested restore process. The supplied Compose password is for local development only. Back up the encryption key separately in a secret manager. Restore the key with the matching data. Do not rotate it by simply editing the environment; decrypt/re-encrypt credentials with a controlled migration or reconnect identities.
 
-Set `APP_URL` to the exact HTTPS origin. Keep `COOKIE_SECURE=true`. A trusted reverse proxy must set client IP headers; strip untrusted forwarded headers for meaningful IP rate limits. Apply an upstream request-size limit as well as the app’s 100 KB JSON limit. Restrict database and Docker access to the processes that need them.
+Set `APP_URL` to the exact HTTPS origin. Keep `COOKIE_SECURE=true`. Set `TRUST_PROXY=true` only when the trusted reverse proxy removes inbound `X-Forwarded-For` and replaces it with the actual client IP; otherwise authentication uses a shared throttle key to prevent header spoofing. Apply an upstream request-size limit as well as the app’s 100 KB JSON limit. Restrict database and Docker access to the processes that need them.
 
 ## Health and diagnostics
 
