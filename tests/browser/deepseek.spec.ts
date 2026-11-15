@@ -23,11 +23,9 @@ test("DeepSeek chat sends streaming requests and displays sanitized failures (mo
   });
   expect(signup.ok()).toBeTruthy();
   await page.goto("/chat");
-  await expect(
-    page.getByText(/^DeepSeek (configured but unverified|verified)$/, {
-      exact: true,
-    }),
-  ).toBeVisible();
+  // Provider diagnostics are operator-only; customers just get a usable chat.
+  await expect(page.getByLabel("Message EasySolve")).toBeVisible();
+  await expect(page.getByText(/DeepSeek (configured|verified)/)).toHaveCount(0);
   await page.route("**/api/chat", async (route) => {
     expect(route.request().headers().accept).toBe("application/x-ndjson");
     await route.fulfill({
