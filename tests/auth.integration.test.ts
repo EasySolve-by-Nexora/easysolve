@@ -29,6 +29,12 @@ async function call(action: string, body: unknown) {
 beforeAll(async () => {
   vi.stubEnv("APP_URL", origin);
   vi.stubEnv("TRUST_PROXY", "true");
+  // Signup sends a welcome email; never contact the real provider in tests.
+  vi.stubEnv("RESEND_API_KEY", "auth-test-resend-key");
+  vi.stubGlobal(
+    "fetch",
+    vi.fn().mockResolvedValue(new Response(null, { status: 200 })),
+  );
   vi.mocked(cookies).mockResolvedValue({ set: setCookie } as any);
   email = `auth-${crypto.randomUUID()}@example.test`;
   originalHash = await bcrypt.hash("eight123", 4);
@@ -46,6 +52,7 @@ afterAll(async () => {
   });
   await db.user.deleteMany({ where: { id: { in: ids } } });
   vi.unstubAllEnvs();
+  vi.unstubAllGlobals();
   await db.$disconnect();
 });
 it("authenticates an existing account with omitted or null signup-only fields without changing its hash", async () => {

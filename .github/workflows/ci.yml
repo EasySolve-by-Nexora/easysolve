@@ -47,6 +47,8 @@ jobs:
           # Browser flows sign in many times from one client; production limits
           # stay covered by the integration tests.
           TRUST_PROXY: "true"
+          RESEND_API_KEY: ci-stubbed-resend-key
+          NODE_OPTIONS: --import ./tests/browser/stub-resend.mjs
           AUTH_IP_LIMIT_PER_MINUTE: "1000"
           AUTH_ACCOUNT_LIMIT_PER_15_MINUTES: "1000"
           RECOVERY_IP_LIMIT_PER_MINUTE: "1000"

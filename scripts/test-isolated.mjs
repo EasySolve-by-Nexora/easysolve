@@ -42,6 +42,8 @@ try {
       APP_URL: "http://localhost:3000",
       COOKIE_SECURE: "false",
       TRUST_PROXY: "true",
+      RESEND_API_KEY: "isolated-stubbed-resend-key",
+      NODE_OPTIONS: "--import ./tests/browser/stub-resend.mjs",
       AUTH_IP_LIMIT_PER_MINUTE: "1000",
       AUTH_ACCOUNT_LIMIT_PER_15_MINUTES: "1000",
       RECOVERY_IP_LIMIT_PER_MINUTE: "1000",
