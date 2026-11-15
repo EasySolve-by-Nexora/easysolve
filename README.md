@@ -56,6 +56,7 @@ Copy the documented names in [.env.example](.env.example); never commit `.env`.
 | `DATABASE_URL`               | PostgreSQL connection string; production records, sessions, jobs, artifacts, usage        |
 | `POSTGRES_PASSWORD`          | Local Compose database password; change with `DATABASE_URL` for production                |
 | `APP_URL`                    | Exact browser origin, no trailing slash; CSRF and recovery links                          |
+| `RESEND_API_KEY`             | Resend sending-only key for welcome and password-reset emails                             |
 | `TOKEN_ENCRYPTION_KEY`       | Base64-encoded 32-byte AES-256-GCM key; `openssl rand -base64 32`                         |
 | `DEEPSEEK_API_KEY`           | Server-only key entered in the private root `.env`; shared by web and worker              |
 | `DEEPSEEK_MODEL`             | Default `deepseek-flash`; no fallback model                                               |
@@ -69,8 +70,8 @@ Copy the documented names in [.env.example](.env.example); never commit `.env`.
 | `SANDBOX_IMAGE`              | Trusted locally built execution image, default `easysolve-sandbox:local`                  |
 | `WORKER_CONCURRENCY`         | Global active job ceiling, default 10; one worker dispatches jobs concurrently            |
 | `WORKER_ACCOUNT_CONCURRENCY` | Per-account active job ceiling, default 10                                                |
-| `RECOVERY_WEBHOOK_URL`       | Optional email delivery adapter URL; receives authenticated POST `{email,url}`            |
-| `RECOVERY_WEBHOOK_SECRET`    | Bearer secret for the recovery adapter                                                    |
+| `RECOVERY_WEBHOOK_URL`       | Legacy optional recovery adapter; Resend is used whenever `RESEND_API_KEY` is configured  |
+| `RECOVERY_WEBHOOK_SECRET`    | Legacy adapter bearer secret                                                              |
 | `COOKIE_SECURE`              | Defaults true for production; false only for local HTTP production-build tests            |
 
 Price estimates are configured in **Run settings** as dollars per million input/cached/output tokens. They are explicitly estimates, not billing charges. User token allowances have configurable UTC reset days (1–28) and hours in Run settings. Server plan entitlements reset on the first day of each UTC calendar month; changing a user reset cannot bypass that ceiling. User settings may lower plan ceilings but cannot raise server entitlements. Background jobs wait for allowance reset instead of becoming permanently failed.

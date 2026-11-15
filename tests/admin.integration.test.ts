@@ -51,8 +51,13 @@ async function call(
 }
 beforeAll(async () => {
   vi.stubEnv("APP_URL", origin);
+  vi.stubEnv("RESEND_API_KEY", "admin-test-resend-key");
   vi.stubEnv("AI_PROVIDER", "deepseek");
   vi.stubEnv("DEEPSEEK_API_KEY", "admin-test-private-provider-key");
+  vi.stubGlobal(
+    "fetch",
+    vi.fn().mockResolvedValue(new Response(null, { status: 200 })),
+  );
   vi.mocked(cookies).mockImplementation(
     async () =>
       ({
@@ -108,6 +113,7 @@ afterAll(async () => {
   });
   await db.user.deleteMany({ where: { id: { in: ids } } });
   vi.unstubAllEnvs();
+  vi.unstubAllGlobals();
   await db.$disconnect();
 });
 
