@@ -5,7 +5,7 @@ import { chatTools } from "./chat-tools";
 import { db } from "./db";
 import { syncIssues } from "./github";
 import { repoName } from "./policy";
-import { startRuns } from "./queue";
+import { startRunsDetailed } from "./queue";
 import { HttpError } from "./security";
 // Tools expose owned data. Consequential actions are returned as previews, never executed by model text.
 export async function chat(
@@ -233,7 +233,17 @@ export async function chatAction(
     if (!action.identityId) throw new HttpError(422, "Select a GitHub account");
     result = await syncIssues(userId, action.identityId);
   } else if (action.action === "start_run") {
-    result = await startRuns(userId, action.ids);
+    if (!Array.isArray(action.ids) || !action.ids.length || action.ids.length > 40)
+      throw new HttpError(422, "Select between 1 and 40 issues");
+    const started = await startRunsDetailed(userId, action.ids);
+    // Never report success when nothing was queued (allowance, job limit, or
+    // ineligible issues); surface the server's reasons instead.
+    if (!started.runs.length)
+      throw new HttpError(
+        409,
+        `No runs were started: ${[...new Set(started.skipped.map((s) => s.reason))].join("; ") || "no eligible issues"}`,
+      );
+    result = started.runs;
   } else {
     const run = await db.run.findFirst({
       where: { id: action.ids[0], userId, status: "awaiting_review" },

@@ -9,7 +9,10 @@ vi.mock("openai", () => ({
     chat = { completions: { create } };
   },
 }));
-vi.mock("../lib/github", () => ({ github: vi.fn().mockResolvedValue(gh) }));
+vi.mock("../lib/github", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../lib/github")>()),
+  github: vi.fn().mockResolvedValue(gh),
+}));
 vi.mock("next/headers", () => ({ cookies: vi.fn() }));
 import { db } from "../lib/db";
 import { ai } from "../lib/ai";
@@ -297,6 +300,10 @@ it("enforces input and provider rate ceilings without per-run AI budgets", async
   delete process.env.AI_JOB_MAX_TOKENS;
   delete process.env.AI_JOB_MAX_REQUESTS;
 
+  // Earlier calls in this test already consumed this user's rate window.
+  await db.rateLimit.deleteMany({
+    where: { key: { in: [`ai:${userId}`, "ai:global"] } },
+  });
   process.env.AI_REQUESTS_PER_MINUTE = "1";
   reply("The first request is allowed.");
   await expect(ai(userId, "rate", "hello", "concise")).resolves.toContain(
