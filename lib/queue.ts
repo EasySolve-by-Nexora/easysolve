@@ -328,6 +328,16 @@ export async function enqueue(
     });
   });
 }
+// Human-readable reason why a start request queued nothing.
+export function noRunsMessage(skipped: { id: string; reason: string }[]) {
+  const reasons = [...new Set(skipped.map((s) => s.reason))];
+  return `No runs were started: ${reasons.join("; ") || "no eligible issues"}`;
+}
+/**
+ * Internal compatibility helper that returns only the started runs. It cannot
+ * report why issues were skipped, so user-facing paths must use
+ * startRunsDetailed and handle `runs.length === 0` explicitly.
+ */
 export async function startRuns(
   userId: string,
   ids: string[],

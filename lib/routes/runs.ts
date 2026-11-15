@@ -2,7 +2,12 @@ import { releaseRun, reserveIssues } from "../entitlements";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { db } from "../db";
-import { approveRun, previewRuns, startRunsDetailed } from "../queue";
+import {
+  approveRun,
+  noRunsMessage,
+  previewRuns,
+  startRunsDetailed,
+} from "../queue";
 import { HttpError } from "../security";
 import type { RouteContext } from "./types";
 const id = z.string().min(1).max(100);
@@ -19,12 +24,18 @@ export async function handleRuns({
   const method = request.method;
   if (route === "runs" && method === "POST") {
     const issueIds = z.array(id).min(1).max(40).parse(body.issueIds);
-    return json(
-      await startRunsDetailed(u.id, issueIds, {
-        grouped: body.grouped === true,
-        requireWorker: true,
-      }),
-    );
+    const result = await startRunsDetailed(u.id, issueIds, {
+      grouped: body.grouped === true,
+      requireWorker: true,
+    });
+    // Partial starts stay 200 with both lists; starting nothing is a conflict
+    // that carries the skipped reasons.
+    if (!result.runs.length)
+      return json(
+        { error: noRunsMessage(result.skipped), ...result },
+        409,
+      );
+    return json(result);
   }
   if (route === "runs/preview" && method === "POST") {
     const issueIds = z.array(id).min(1).max(40).parse(body.issueIds);

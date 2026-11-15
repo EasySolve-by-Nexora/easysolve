@@ -2,8 +2,9 @@ import bcrypt from "bcryptjs";
 import { NextResponse } from "next/server";
 import { randomBytes } from "node:crypto";
 import { db } from "../db";
+import { throttleAuth } from "../auth-throttle";
 import { sendPasswordResetEmail, sendWelcomeEmail } from "../email";
-import { hash, HttpError, rateLimit, session } from "../security";
+import { hash, HttpError, session } from "../security";
 import type { RouteContext } from "./types";
 import {
   loginSchema,
@@ -15,17 +16,6 @@ import {
 const json = (data: unknown, status = 200) =>
   NextResponse.json(data, { status });
 
-function authRateLimitKey(request: Request) {
-  // Forwarded headers are client-controlled unless the reverse proxy strips
-  // and replaces them. Opt in only after configuring such a proxy; the shared
-  // fallback cannot be bypassed by inventing an IP address.
-  const forwarded =
-    process.env.TRUST_PROXY === "true"
-      ? request.headers.get("x-forwarded-for")?.split(",")[0]?.trim()
-      : undefined;
-  return `auth:${forwarded || "shared"}`;
-}
-
 export async function handleAuth({
   request,
   path,
@@ -35,7 +25,7 @@ export async function handleAuth({
   const route = path.join("/");
   const method = request.method;
   if (route === "auth/signup" || route === "auth/login") {
-    await rateLimit(authRateLimitKey(request), 10);
+    await throttleAuth(request, "login", body?.email);
     if (route === "auth/signup") {
       const input = parseAuthInput(signupSchema, body);
       if (await db.user.findUnique({ where: { email: input.email } }))
@@ -76,56 +66,60 @@ export async function handleAuth({
     return json({ ok: true });
   }
   if (route === "auth/recover") {
-    await rateLimit("recover", 5);
+    await throttleAuth(request, "recover", body?.email);
     const { email } = parseAuthInput(recoverySchema, body);
+    const generic = json({
+      message: "If this account exists, a recovery link has been sent.",
+    });
     const u = await db.user.findUnique({ where: { email } });
-    if (u) {
-      if (!process.env.RESEND_API_KEY && !process.env.RECOVERY_WEBHOOK_URL)
-        throw new HttpError(
-          503,
-          "Account recovery delivery is not configured. Contact your operator.",
-        );
+    // The response never depends on whether the account exists or whether
+    // delivery worked, so this endpoint cannot be used to enumerate accounts.
+    // Operators see delivery problems in server logs instead.
+    if (!u) return generic;
+    let resetId: string | undefined;
+    try {
+      if (!process.env.APP_URL) throw new Error("APP_URL is not configured");
       const token = randomBytes(32).toString("base64url");
+      resetId = hash(token);
       await db.reset.create({
         data: {
-          id: hash(token),
+          id: resetId,
           userId: u.id,
           expiresAt: new Date(Date.now() + 1800000),
         },
       });
       const resetUrl = `${process.env.APP_URL}/?reset=${token}`;
-      try {
-        if (process.env.RESEND_API_KEY) {
-          await sendPasswordResetEmail({
-            email: u.email,
-            url: resetUrl,
-            tokenHash: hash(token),
-          });
-        } else {
-          const sent = await fetch(process.env.RECOVERY_WEBHOOK_URL!, {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: `Bearer ${process.env.RECOVERY_WEBHOOK_SECRET ?? ""}`,
-            },
-            body: JSON.stringify({ email: u.email, url: resetUrl }),
-            signal: AbortSignal.timeout(10000),
-          });
-          if (!sent.ok) throw new Error("Recovery webhook delivery failed");
-        }
-      } catch {
-        await db.reset.delete({ where: { id: hash(token) } });
-        throw new HttpError(
-          503,
-          "Recovery delivery failed. Contact your operator.",
-        );
+      if (process.env.RESEND_API_KEY) {
+        await sendPasswordResetEmail({
+          email: u.email,
+          url: resetUrl,
+          tokenHash: resetId,
+        });
+      } else if (process.env.RECOVERY_WEBHOOK_URL) {
+        const sent = await fetch(process.env.RECOVERY_WEBHOOK_URL, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${process.env.RECOVERY_WEBHOOK_SECRET ?? ""}`,
+          },
+          body: JSON.stringify({ email: u.email, url: resetUrl }),
+          signal: AbortSignal.timeout(10000),
+        });
+        if (!sent.ok) throw new Error(`Recovery webhook returned ${sent.status}`);
+      } else {
+        throw new Error("No account recovery email provider is configured");
       }
+    } catch (error) {
+      if (resetId)
+        await db.reset.delete({ where: { id: resetId } }).catch(() => undefined);
+      console.error("Account recovery delivery failed", {
+        reason: error instanceof Error ? error.message : "unknown",
+      });
     }
-    return json({
-      message: "If this account exists, a recovery link has been sent.",
-    });
+    return generic;
   }
   if (route === "auth/reset") {
+    await throttleAuth(request, "recover", undefined);
     const input = parseAuthInput(resetSchema, body);
     const password = await bcrypt.hash(input.password, 12);
     await db.$transaction(async (tx) => {

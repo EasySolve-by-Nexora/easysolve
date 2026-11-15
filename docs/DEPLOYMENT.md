@@ -32,7 +32,8 @@ cover uninterrupted operation for a full month, even when waiting for work; see
 Sign in with `npx vercel login`, link the intended project with `npx vercel link`,
 and configure production environment variables through Vercel's environment settings.
 Set `DATABASE_URL`, `TOKEN_ENCRYPTION_KEY`, `APP_URL` (the exact production HTTPS
-origin), `COOKIE_SECURE=true`, and the selected provider's configuration from
+origin), `COOKIE_SECURE=true`, `TRUST_PROXY=true` (required; Vercel's edge replaces
+`X-Forwarded-For` with the client IP), and the selected provider's configuration from
 `.env.example`. Configure `ADMIN_ORIGIN` only when using a separate admin origin.
 Never upload the local `.env` file or print secret values.
 
@@ -64,7 +65,7 @@ Use a supervisor (systemd, an orchestrator, or your process manager) to restart 
 
 Use a production PostgreSQL service with backups, TLS, restricted credentials, and a tested restore process. The supplied Compose password is for local development only. Back up the encryption key separately in a secret manager. Restore the key with the matching data. Do not rotate it by simply editing the environment; decrypt/re-encrypt credentials with a controlled migration or reconnect identities.
 
-Set `APP_URL` to the exact HTTPS origin. Keep `COOKIE_SECURE=true`. Set `TRUST_PROXY=true` only when the trusted reverse proxy removes inbound `X-Forwarded-For` and replaces it with the actual client IP; otherwise authentication uses a shared throttle key to prevent header spoofing. Apply an upstream request-size limit as well as the app’s 100 KB JSON limit. Restrict database and Docker access to the processes that need them.
+Set `APP_URL` to the exact HTTPS origin. Keep `COOKIE_SECURE=true`. `TRUST_PROXY=true` is required in production, and the reverse proxy must remove inbound `X-Forwarded-For` and replace it with the actual client IP. Without it (or when the header is missing) sign-in, sign-up, recovery and reset return 503 rather than using a shared key that anyone could exhaust. Sign-in and sign-up are limited per trusted client IP and per hashed, normalized email; recovery has its own separate per-IP and per-email limits, and its response is identical whether or not the account exists (delivery failures are logged, not returned). Raw emails are never stored in rate-limit keys. Limits can be tuned with the `AUTH_*` and `RECOVERY_*` variables in `.env.example`. Note that a per-account limit lets someone deliberately slow sign-in attempts for a known email; the IP limit and hashed keys keep that bounded to that single account. Apply an upstream request-size limit as well as the app’s 100 KB JSON limit. Restrict database and Docker access to the processes that need them.
 
 ## Health and diagnostics
 
@@ -76,12 +77,13 @@ Set `APP_URL` to the exact HTTPS origin. Keep `COOKIE_SECURE=true`. Set `TRUST_P
 - If sandbox creation fails: run `docker info`, then `docker build -t easysolve-sandbox:local sandbox`. The worker must have Docker access, and the configured image must exist.
 - If tests cannot run: the default sandbox is offline and includes Node, Git, and Python. It has no repository dependencies. Supply a vetted image for additional preinstalled tools; do not give the sandbox internet access or credentials to make tests appear successful.
 - If publication fails after fork creation: GitHub may still be preparing the fork, or the token cannot access it. Correct permissions and retry the failed publication job through run approval. Inspect any existing branch rather than deleting it blindly.
+- If sign-in, sign-up, recovery or reset return 503 "Authentication is temporarily unavailable": production requires `TRUST_PROXY=true` and a client IP in `X-Forwarded-For`. Set it only behind a proxy that overwrites that header, then restart the web service. `npm run doctor` reports this, and the server logs the reason.
 - If writes return 403 Origin rejected: correct `APP_URL` and restart both services.
 - If a token becomes unreadable: restore the matching encryption key or replace the credential through Account. Existing plaintext tokens are never recoverable in the UI.
 
 ## Account recovery
 
-Configure `RESEND_API_KEY` as a sending-only Resend key restricted to `nexoratech.works`. EasySolve sends welcome and password-reset messages from `EasySolve <easysolve@nexoratech.works>`; the emails use the product logo and reset links expire after 30 minutes. Keep `APP_URL` set to the public HTTPS origin so reset links are valid. `RECOVERY_WEBHOOK_URL` and `RECOVERY_WEBHOOK_SECRET` remain a legacy fallback only when no Resend key is configured. Keep operator access to database backups; do not manually set weak passwords.
+Configure `RESEND_API_KEY` as a sending-only Resend key restricted to `nexoratech.works`. EasySolve sends welcome and password-reset messages from `EasySolve <easysolve@nexoratech.works>`; the emails use the product logo and reset links expire after 30 minutes. Keep `APP_URL` set to the public HTTPS origin so reset links are valid. `RECOVERY_WEBHOOK_URL` and `RECOVERY_WEBHOOK_SECRET` remain a legacy fallback only when no Resend key is configured. Recovery always returns the same response for every address and logs provider failures instead of exposing them. Keep operator access to database backups; do not manually set weak passwords.
 
 ## Billing
 

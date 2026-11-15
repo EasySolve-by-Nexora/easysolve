@@ -43,6 +43,14 @@ jobs:
       - run: npm run test:integration
       - run: npx playwright install --with-deps chromium
       - run: npm run test:browser
+        env:
+          # Browser flows sign in many times from one client; production limits
+          # stay covered by the integration tests.
+          TRUST_PROXY: "true"
+          AUTH_IP_LIMIT_PER_MINUTE: "1000"
+          AUTH_ACCOUNT_LIMIT_PER_15_MINUTES: "1000"
+          RECOVERY_IP_LIMIT_PER_MINUTE: "1000"
+          RECOVERY_ACCOUNT_LIMIT_PER_HOUR: "1000"
       - run: npm run build
       - run: docker build -f Dockerfile.worker -t easysolve-worker:ci .
       - uses: actions/upload-artifact@v4

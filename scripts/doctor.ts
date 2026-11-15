@@ -5,6 +5,12 @@ import { db } from "../lib/db";
 let failed = false;
 console.log(`EasySolve diagnostics · Node ${process.version}`);
 console.log(`Browser origin: ${process.env.APP_URL || "not configured"}`);
+const proxyOk =
+  process.env.NODE_ENV !== "production" || process.env.TRUST_PROXY === "true";
+console.log(
+  `Trusted proxy: ${proxyOk ? (process.env.TRUST_PROXY === "true" ? "TRUST_PROXY=true" : "not required outside production") : "setup required: set TRUST_PROXY=true behind a proxy that overwrites X-Forwarded-For, or sign-in returns 503"}`,
+);
+if (!proxyOk) failed = true;
 const provider = providerConfig();
 console.log(
   `${provider.name}: ${provider.configured ? "key configured (not live-verified)" : "setup required"} · model ${provider.model || "selection required"}${"region" in provider ? ` · Region ${provider.region || "required"}` : ""}`,
