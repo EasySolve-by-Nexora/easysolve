@@ -182,6 +182,16 @@ export async function handleAdmin({ request, path, body, url }: RouteContext) {
         select: {
           ...accountSelect,
           settings: true,
+          identities: {
+            select: {
+              id: true,
+              login: true,
+              status: true,
+              active: true,
+              usable: true,
+            },
+            orderBy: [{ login: "asc" }],
+          },
           _count: {
             select: {
               repos: true,
@@ -303,6 +313,54 @@ export async function handleAdmin({ request, path, body, url }: RouteContext) {
   }
   if (request.method !== "POST")
     throw new HttpError(405, "Use POST for admin changes");
+  if (
+    path[1] === "users" &&
+    path.length === 6 &&
+    path[3] === "identities" &&
+    path[5] === "delete"
+  ) {
+    const targetId = id.parse(path[2]);
+    const identityId = id.parse(path[4]);
+    const input = z
+      .object({ reason: z.string().trim().min(3).max(500) })
+      .strict()
+      .parse(body);
+    await adminTransaction(actor.id, async (tx) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${targetId}))`;
+      const identity = await tx.identity.findFirst({
+        where: { id: identityId, userId: targetId },
+      });
+      if (!identity) throw new HttpError(404, "Identity not found");
+      if (
+        await tx.run.count({
+          where: {
+            userId: targetId,
+            identityId,
+            status: { in: ["queued", "running"] },
+          },
+        })
+      )
+        throw new HttpError(409, "Cancel active runs before removing an identity");
+      await tx.identity.delete({ where: { id: identity.id } });
+      await tx.adminAudit.create({
+        data: {
+          actorId: actor.id,
+          targetId,
+          action: "identity.delete",
+          reason: redactDiagnostic(input.reason)!,
+          oldValues: {
+            login: identity.login,
+            active: identity.active,
+            usable: identity.usable,
+            status: identity.status,
+          },
+          newValues: { deleted: true },
+          details: { identityId: identity.id },
+        },
+      });
+    });
+    return json({ ok: true });
+  }
   if (path[1] === "users" && path.length === 4) {
     const targetId = id.parse(path[2]);
     if (path[3] === "delete") {

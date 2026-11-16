@@ -25,6 +25,13 @@ type AccountDetail = Account & {
   settings: { monthlyJobs: number; monthlyTokens: number };
   usage: { _sum: { total: number | null }; _count: number };
   repositories: { id: string; fullName: string; health: string }[];
+  identities: {
+    id: string;
+    login: string;
+    status: string;
+    active: boolean;
+    usable: boolean;
+  }[];
 };
 type Job = {
   id: string;
@@ -152,6 +159,7 @@ export function AdminDashboard({ ownerName }: { ownerName: string }) {
   const [reason, setReason] = useState("");
   const [deleteEmail, setDeleteEmail] = useState("");
   const [deleteReason, setDeleteReason] = useState("");
+  const [identityReason, setIdentityReason] = useState("");
 
   useEffect(() => {
     let active = true;
@@ -194,6 +202,7 @@ export function AdminDashboard({ ownerName }: { ownerName: string }) {
       setAccount(value);
       setDeleteEmail("");
       setDeleteReason("");
+      setIdentityReason("");
       setReason("");
       setPlanName(value.planName ?? "");
       setPlanJobs(value.planMaxJobs?.toString() ?? "");
@@ -520,6 +529,52 @@ export function AdminDashboard({ ownerName }: { ownerName: string }) {
                 {number(account.settings.monthlyTokens)} tokens. The lower
                 applicable limit is enforced.
               </p>
+              <section className={styles.form} aria-label="GitHub identities">
+                <h3>GitHub identities</h3>
+                <p>
+                  Permanent removal is administrator-only. It deletes the saved
+                  credential and frees the account slot; repository and run
+                  history stay intact.
+                </p>
+                <Field label="Reason for identity removal">
+                  <input
+                    required
+                    minLength={3}
+                    maxLength={500}
+                    value={identityReason}
+                    onChange={(event) => setIdentityReason(event.target.value)}
+                  />
+                </Field>
+                {account.identities.length ? (
+                  account.identities.map((identity) => (
+                    <div className={styles.row} key={identity.id}>
+                      <span>
+                        @{identity.login} · {identity.status} ·{" "}
+                        {identity.active ? "Active" : "Inactive"}
+                      </span>
+                      <Button
+                        disabled={busy || identityReason.trim().length < 3}
+                        onClick={() => {
+                          if (
+                            window.confirm(
+                              `Permanently remove @${identity.login} from ${account.email}? The saved credential cannot be restored.`,
+                            )
+                          )
+                            void change(
+                              `users/${account.id}/identities/${identity.id}/delete`,
+                              { reason: identityReason },
+                              `Removed @${identity.login}.`,
+                            );
+                        }}
+                      >
+                        Remove identity
+                      </Button>
+                    </div>
+                  ))
+                ) : (
+                  <p>No saved GitHub identities.</p>
+                )}
+              </section>
               <form
                 className={styles.form}
                 onSubmit={(e) => {

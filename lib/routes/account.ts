@@ -114,10 +114,6 @@ export async function handleAccount({
         })
       )
         throw new HttpError(409, "Cancel active runs before disconnecting");
-      if (path[2] === "purge") {
-        await db.identity.delete({ where: { id: identity.id } });
-        return json({ ok: true });
-      }
       await db.identity.update({
         where: { id: identity.id },
         data: { active: false, usable: false, status: "disconnected" },
