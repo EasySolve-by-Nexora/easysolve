@@ -132,6 +132,12 @@ export async function ai(
       onText: conversation?.onText,
     });
   } catch (error) {
+    // A user cancelling (or a dropped connection) says nothing about the provider.
+    if (
+      conversation?.signal?.aborted ||
+      (error as { name?: string })?.name === "AbortError"
+    )
+      throw error;
     await db.providerConnection.upsert({
       where: { id: provider.id },
       create: {
@@ -180,8 +186,6 @@ export async function ai(
       },
     });
   });
-  if (runId) {
-  }
   if (result.failure) throw result.failure;
   if (conversation) conversation.calls = result.calls;
   if (result.calls.length > 1) {

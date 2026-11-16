@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { compatibleGroups } from "../lib/run-groups";
 import {
-  groups,
   issueComplexity,
   monthStart,
   nextMonth,
@@ -9,15 +9,18 @@ import {
   settings,
 } from "../lib/policy";
 describe("workflow policies", () => {
-  it("groups by repository with a maximum of four and no omissions", () => {
+  it("groups by repository and identity with a maximum of four and no omissions", () => {
     const input = Array.from({ length: 11 }, (_, i) => ({
       id: i,
       repo: i % 3 === 0 ? "a/b" : "c/d",
+      identityId: i === 10 ? "other" : "main",
     }));
-    const result = groups(input);
+    const result = compatibleGroups(input);
     expect(
       result.every(
-        (g) => g.length <= 4 && new Set(g.map((i) => i.repo)).size === 1,
+        (g) =>
+          g.length <= 4 &&
+          new Set(g.map((i) => `${i.repo}:${i.identityId}`)).size === 1,
       ),
     ).toBe(true);
     expect(
@@ -42,6 +45,10 @@ describe("workflow policies", () => {
       "https://evil.test/a/b",
       "a/b/issues/1",
       "a/b?x=1",
+      "../..",
+      "a/..",
+      "./b",
+      "https://github.com/../x",
     ])
       expect(() => repoName(value)).toThrow();
   });

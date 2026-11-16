@@ -269,6 +269,9 @@ export async function chatAction(
       throw new HttpError(409, noRunsMessage(started.skipped));
     result = started.runs;
   } else {
+    // An undefined id would make Prisma drop the filter and match any run.
+    if (typeof action.ids?.[0] !== "string" || !action.ids[0])
+      throw new HttpError(422, "Select a run to prepare");
     const run = await db.run.findFirst({
       where: { id: action.ids[0], userId, status: "awaiting_review" },
     });

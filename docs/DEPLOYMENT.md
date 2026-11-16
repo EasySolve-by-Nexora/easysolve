@@ -73,6 +73,7 @@ Set `APP_URL` to the exact HTTPS origin. Keep `COOKIE_SECURE=true`. `TRUST_PROXY
 - `GET /api/health` checks PostgreSQL, returns 503/500 on failures, and reports whether AI/encryption are configured. Configuration does not claim that a live provider request succeeded.
 - Worker stdout reports startup, retry loops, and job IDs. Job errors and future availability are persisted in `Job`. Run pages show execution failures and actual output.
 - If issues do not sync: ensure `npm run worker:start` is running, autosync is enabled, identities are active, and token permissions/SSO are valid. Manual sync queues work; it does not execute it in the request.
+- If a run ends as blocked with "time limit" or "step limit": it hit `AGENT_MAX_SECONDS` / `AGENT_MAX_STEPS`. Retry with a narrower issue or clearer instructions; raise the limits only if runs routinely need more.
 - If a run is queued: inspect allowance, `Job.availableAt`, concurrent jobs, worker connectivity, and leases. User allowance reset days/hours are configured in Run settings; server plan ceilings reset at UTC month boundaries.
 - If sandbox creation fails: run `docker info`, then `docker build -t easysolve-sandbox:local sandbox`. The worker must have Docker access, and the configured image must exist.
 - If tests cannot run: the default sandbox is offline and includes Node, Git, and Python. It has no repository dependencies. Supply a vetted image for additional preinstalled tools; do not give the sandbox internet access or credentials to make tests appear successful.

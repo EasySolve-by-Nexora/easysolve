@@ -1,6 +1,7 @@
 import { entitlementSummary, reserveIssues } from "./entitlements";
 import { db } from "./db";
 import { monthStart, settings, planLimits } from "./policy";
+import { compatibleGroups } from "./run-groups";
 import { HttpError } from "./security";
 
 export type RunSelectionOptions = {
@@ -43,21 +44,6 @@ function assignedToIssue(issue: SelectionIssue, login: string) {
   );
 }
 
-function compatibleGroups(issues: SelectionIssue[]) {
-  const map = new Map<string, SelectionIssue[]>();
-  for (const issue of issues) {
-    const key = issue.repo + ":" + issue.identityId;
-    const same = map.get(key) ?? [];
-    same.push(issue);
-    map.set(key, same);
-  }
-  return [...map.values()].flatMap((items) =>
-    Array.from({ length: Math.ceil(items.length / 4) }, (_, index) =>
-      items.slice(index * 4, index * 4 + 4),
-    ),
-  );
-}
-
 async function selectionPreview(
   tx: any,
   userId: string,
@@ -67,7 +53,6 @@ async function selectionPreview(
   const unique = [...new Set(ids)];
   const account = await tx.user.findUniqueOrThrow({ where: { id: userId } });
   if (account.suspendedAt) throw new HttpError(403, "Account suspended");
-  const config = settings(account.settings);
   const identityIds = [
     ...new Set(
       (
@@ -347,94 +332,6 @@ export async function startRuns(
     throw new HttpError(422, "Select between 1 and 40 issues");
   const result = await startRunsDetailed(userId, ids, options);
   return result.runs;
-  /* return db.$transaction(async (tx) => {
-    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${userId}))`;
-    const u = await tx.user.findUniqueOrThrow({ where: { id: userId } });
-    if (u.suspendedAt) throw new HttpError(403, "Account suspended");
-    const config = settings(u.settings);
-    const count = await tx.run.count({
-      where: { userId, createdAt: { gte: monthStart() } },
-    });
-    const issues = await tx.issue.findMany({
-      where: {
-        id: { in: ids },
-        userId,
-        state: "open",
-        status: { in: ["ready", "failed"] },
-      },
-    });
-    if (issues.length !== new Set(ids).size)
-      throw new HttpError(
-        409,
-        "Some issues are unavailable or already have a run",
-      );
-    const priorRuns = await tx.run.findMany({
-      where: {
-        userId,
-        status: {
-          in: ["queued", "running", "awaiting_review", "published", "failed"],
-        },
-      },
-    });
-    const pendingJobs = await tx.job.findMany({
-      where: { userId, kind: "run", status: { in: ["queued", "running"] } },
-    });
-    const pendingKeys = new Set(pendingJobs.map((j) => j.key));
-    if (
-      priorRuns.some(
-        (r) =>
-          (r.status !== "failed" || pendingKeys.has(`run:${r.id}`)) &&
-          (r.issueIds as string[]).some((id) => ids.includes(id)),
-      )
-    )
-      throw new HttpError(
-        409,
-        "Some issues already belong to an active run or retry",
-      );
-    const batches = groups(issues);
-    if (
-      count + batches.length >
-      Math.min(config.monthlyJobs, planLimits(u).jobs)
-    )
-      throw new HttpError(403, "Monthly job limit reached");
-    const runs = [];
-    for (const batch of batches) {
-      const run = await tx.run.create({
-        data: {
-          userId,
-          identityId: batch[0].identityId,
-          repo: batch[0].repo,
-          issueIds: batch.map((i) => i.id),
-          title: batch.map((i) => `#${i.number} ${i.title}`).join(" · "),
-          branch: `fix/${crypto.randomUUID()}`,
-          mode: config.mode,
-          stage: "queued",
-          maxRepairAttempts: config.maxRepairAttempts,
-        },
-      });
-      if (run.mode !== "plan")
-        await reserveIssues(
-          tx,
-          userId,
-          run.id,
-          batch.map((i) => i.id),
-        );
-      await tx.issue.updateMany({
-        where: { id: { in: batch.map((i) => i.id) }, userId },
-        data: { status: "in_progress" },
-      });
-      await tx.job.create({
-        data: {
-          userId,
-          kind: "run",
-          key: `run:${run.id}`,
-          payload: { runId: run.id },
-        },
-      });
-      runs.push(run);
-    }
-    return runs;
-  }); */
 }
 export async function claimJob() {
   return db.$transaction(async (tx) => {
@@ -445,9 +342,9 @@ export async function claimJob() {
     );
     const accountLimit = Math.min(
       20,
-    // One active job per account keeps shared AI/GitHub limits coordinated.
-    // Owners can raise this deliberately when their upstream limits allow it.
-    Math.max(1, Number(process.env.WORKER_ACCOUNT_CONCURRENCY || 1)),
+      // One active job per account keeps shared AI/GitHub limits coordinated.
+      // Owners can raise this deliberately when their upstream limits allow it.
+      Math.max(1, Number(process.env.WORKER_ACCOUNT_CONCURRENCY || 1)),
     );
     const active = await tx.job.count({
       where: { status: "running", leaseUntil: { gt: new Date() } },
