@@ -341,10 +341,11 @@ export async function claimJob() {
       Math.max(1, Number(process.env.WORKER_CONCURRENCY || 10)),
     );
     const accountLimit = Math.min(
-      20,
-      // One active job per account keeps shared AI/GitHub limits coordinated.
-      // Owners can raise this deliberately when their upstream limits allow it.
-      Math.max(1, Number(process.env.WORKER_ACCOUNT_CONCURRENCY || 1)),
+      4,
+      // Independent issues can be solved concurrently. GitHub requests remain
+      // coordinated per account and provider requests retain their own rate
+      // limits, so this improves throughput without bypassing either service.
+      Math.max(1, Number(process.env.WORKER_ACCOUNT_CONCURRENCY || 4)),
     );
     const active = await tx.job.count({
       where: { status: "running", leaseUntil: { gt: new Date() } },
@@ -362,16 +363,6 @@ export async function claimJob() {
              AND active_job.status = 'running'
              AND active_job."leaseUntil" > NOW()
          ) < ${accountLimit}
-       AND (
-         j."kind" <> 'run' OR NOT EXISTS (
-           SELECT 1
-           FROM "Job" earlier_run
-           WHERE earlier_run."userId" = j."userId"
-             AND earlier_run."kind" = 'run'
-             AND earlier_run.status IN ('queued', 'running')
-             AND earlier_run."createdAt" < j."createdAt"
-         )
-       )
        ORDER BY j."createdAt"
        FOR UPDATE OF j SKIP LOCKED
        LIMIT 1`;

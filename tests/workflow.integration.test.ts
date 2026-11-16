@@ -174,6 +174,46 @@ describe("durable issue → run → approval → PR workflow", () => {
       data: { status: "completed" },
     });
   });
+  it("claims independent runs for the same account concurrently", async () => {
+    const concurrentUser = await db.user.create({
+      data: {
+        email: `parallel-${crypto.randomUUID()}@example.test`,
+        name: "Parallel fixture",
+        password: "not-a-real-password",
+      },
+    });
+    cleanupUserIds.push(concurrentUser.id);
+    const [firstJob, secondJob] = await Promise.all([
+      enqueue(
+        concurrentUser.id,
+        "run",
+        `run:${crypto.randomUUID()}`,
+        { runId: crypto.randomUUID() },
+      ),
+      enqueue(
+        concurrentUser.id,
+        "run",
+        `run:${crypto.randomUUID()}`,
+        { runId: crypto.randomUUID() },
+      ),
+    ]);
+    // Isolate this assertion from fixture jobs created by earlier tests.
+    await db.job.updateMany({
+      where: {
+        status: "queued",
+        id: { notIn: [firstJob.id, secondJob.id] },
+      },
+      data: { availableAt: new Date(Date.now() + 86400000) },
+    });
+    const claimed = await Promise.all([claimJob(), claimJob()]);
+    expect(claimed.map((job) => job?.id).sort()).toEqual(
+      [firstJob.id, secondJob.id].sort(),
+    );
+    await db.job.updateMany({
+      where: { id: { in: [firstJob.id, secondJob.id] } },
+      data: { status: "completed", leaseUntil: null },
+    });
+  });
   it("previews bulk work without reserving allowance and skips unassigned issues", async () => {
     const eligible = await issue("test/preview");
     const skipped = await db.issue.create({

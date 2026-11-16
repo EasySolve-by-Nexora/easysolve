@@ -32,7 +32,10 @@ export class GitHub {
     const key = `github:${this.coordinationKey}`;
     const configuredInterval =
       method === "GET"
-        ? Number(process.env.GITHUB_MIN_INTERVAL_MS || 250)
+        // Read-only requests can be paced more tightly than mutations. This
+        // keeps repository checkout responsive without bypassing the shared,
+        // durable rate-limit coordination below.
+        ? Number(process.env.GITHUB_MIN_INTERVAL_MS || 100)
         : Number(process.env.GITHUB_MIN_MUTATION_INTERVAL_MS || 1000);
     const interval = Math.min(
       5000,
