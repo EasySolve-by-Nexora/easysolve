@@ -16,6 +16,7 @@ import { executeRun, publish } from "./agent";
 import { recordProviderRuntime } from "../lib/provider-runtime";
 import { HttpError } from "../lib/security";
 import { sendWelcomeEmail } from "../lib/email";
+import { waitForActivity } from "../lib/worker-loop";
 const workerId = process.env.WORKER_ID || "worker:" + process.pid;
 const workerVersion =
   process.env.RELEASE_VERSION || process.env.VERCEL_GIT_COMMIT_SHA || "unknown";
@@ -35,7 +36,12 @@ let stopped = false;
 process.on("SIGTERM", () => (stopped = true));
 process.on("SIGINT", () => (stopped = true));
 async function tick() {
-  await reconcilePayments();
+  // Independent steps: a payment-provider outage must not skip cleanup or sync scheduling.
+  await reconcilePayments().catch((error) =>
+    console.error("Payment reconciliation failed", {
+      reason: error instanceof Error ? error.message : "unknown",
+    }),
+  );
   await db.session.deleteMany({ where: { expiresAt: { lt: new Date() } } });
   await db.reset.deleteMany({ where: { expiresAt: { lt: new Date() } } });
   await db.rateLimit.deleteMany({ where: { expiresAt: { lt: new Date() } } });
@@ -51,10 +57,19 @@ async function tick() {
     },
     include: { user: true },
   });
+  const selection = new Map<string, boolean>();
+  const selectionRequired = async (userId: string) => {
+    if (!selection.has(userId))
+      selection.set(
+        userId,
+        (await entitlementSummary(userId)).selectionRequired,
+      );
+    return selection.get(userId)!;
+  };
   for (const i of identities)
     if (
       settings(i.user.settings).autosync &&
-      !(await entitlementSummary(i.userId)).selectionRequired
+      !(await selectionRequired(i.userId))
     )
       await enqueue(
         i.userId,
@@ -77,7 +92,7 @@ async function tick() {
           usable: true,
         },
       })) &&
-      !(await entitlementSummary(r.userId)).selectionRequired
+      !(await selectionRequired(r.userId))
     )
       await enqueue(
         r.userId,
@@ -98,11 +113,22 @@ async function main() {
   console.log(
     `EasySolve worker online; PostgreSQL durable queue, concurrency=${concurrency}`,
   );
+  let maintaining: Promise<void> | null = null;
   while (!stopped) {
     try {
-      if (Date.now() - last > 60000) {
-        await tick();
+      // Maintenance (payments, cleanup, sync scheduling) runs beside job
+      // execution so a slow external call can never stop job claiming.
+      if (!maintaining && Date.now() - last > 60000) {
         last = Date.now();
+        maintaining = tick()
+          .catch((error) =>
+            console.error("Worker maintenance failed", {
+              reason: error instanceof Error ? error.message : "unknown",
+            }),
+          )
+          .finally(() => {
+            maintaining = null;
+          });
       }
       while (!stopped && active.size < concurrency) {
         const job = await claimJob();
@@ -110,16 +136,17 @@ async function main() {
         const task = processJob(job).finally(() => active.delete(task));
         active.add(task);
       }
-      if (!active.size) {
-        await new Promise((r) => setTimeout(r, 1500));
-        continue;
-      }
-      await Promise.race(active);
-    } catch {
-      console.error("Worker database unavailable; retrying in 5 seconds");
+      // Wake when a job finishes OR after the poll interval, so new jobs are
+      // picked up while long runs are still executing.
+      await waitForActivity(active, 1500);
+    } catch (error) {
+      console.error("Worker loop error; retrying in 5 seconds", {
+        reason: error instanceof Error ? error.message : "unknown",
+      });
       await new Promise((r) => setTimeout(r, 5000));
     }
   }
+  await maintaining;
   await Promise.allSettled(active);
   clearInterval(heartbeatTimer);
   await db.workerHeartbeat
@@ -147,11 +174,23 @@ async function processJob(job: Awaited<ReturnType<typeof claimJob>>) {
       identityId?: string;
       repositoryId?: string;
     };
-    if (job.kind === "run") await executeRun(job.userId, p.runId!);
-    else if (job.kind === "publish") await publish(job.userId, p.runId!);
+    // An undefined id would make Prisma drop the filter and match another row.
+    const need = (value: string | undefined, name: string) => {
+      if (typeof value !== "string" || !value)
+        throw new Error(`Job payload is missing ${name}`);
+      return value;
+    };
+    if (job.kind === "run")
+      await executeRun(job.userId, need(p.runId, "runId"));
+    else if (job.kind === "publish")
+      await publish(job.userId, need(p.runId, "runId"));
     else if (job.kind === "repository_sync")
-      await syncRepositoryStats(job.userId, p.repositoryId!);
-    else if (job.kind === "sync") await syncIssues(job.userId, p.identityId!);
+      await syncRepositoryStats(
+        job.userId,
+        need(p.repositoryId, "repositoryId"),
+      );
+    else if (job.kind === "sync")
+      await syncIssues(job.userId, need(p.identityId, "identityId"));
     else if (job.kind === "welcome_email") {
       // Welcome email is delivered during signup. Complete jobs queued by
       // older deployments without requiring an email credential on workers.
@@ -161,8 +200,7 @@ async function processJob(job: Awaited<ReturnType<typeof claimJob>>) {
           email: account.email,
           name: account.name,
         });
-    }
-    else throw Error("Unknown job kind");
+    } else throw Error("Unknown job kind");
     await db.job.updateMany({
       where: { id: job.id, status: "running", attempts: job.attempts },
       data: { status: "completed", leaseUntil: null, error: null },

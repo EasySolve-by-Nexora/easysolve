@@ -5,6 +5,11 @@ import { db } from "../lib/db";
 import { GithubRateLimitError, github } from "../lib/github";
 import { approveRun } from "../lib/queue";
 import { HttpError } from "../lib/security";
+import { assertWithinAgentLimits } from "../lib/agent-limits";
+import {
+  hasPassingValidation,
+  isMeaningfulValidation,
+} from "../lib/agent-validation";
 import { Sandbox } from "./sandbox";
 const responseSchema = z.object({
   plan: z.string(),
@@ -55,14 +60,6 @@ function parseAgentResponse(raw: string) {
     command: parsed.command ?? null,
     summary: parsed.summary ?? null,
   };
-}
-function hasPassingValidation(tests: string) {
-  return /"exitCode"\s*:\s*0\b/.test(tests);
-}
-function isMeaningfulValidation(command: string) {
-  return /\b(test|tests|check|lint|typecheck|build|verify|pytest|unittest)\b|cargo\s+(test|check)|go\s+test/i.test(
-    command,
-  );
 }
 function boundedIssueContext(
   issues: { number: number; title: string; body: string }[],
@@ -145,7 +142,8 @@ export async function executeRun(userId: string, id: string) {
   let logs = "";
   let validationStartedAt = 0;
   const log = async (value: string) => {
-    logs += `${new Date().toISOString()} ${value}\n`;
+    // Keep only the most recent output so the row cannot grow without bound.
+    logs = `${logs}${new Date().toISOString()} ${value}\n`.slice(-200000);
     await db.run.update({
       where: { id },
       data: { logs, lastProgressAt: new Date() },
@@ -255,6 +253,8 @@ export async function executeRun(userId: string, id: string) {
       finished = false,
       validationPassed = false;
     while (true) {
+      // Hard step and wall-clock ceilings (AGENT_MAX_STEPS / AGENT_MAX_SECONDS).
+      assertWithinAgentLimits({ steps: step, startedAt: executionStartedAt });
       const current = await db.run.findFirstOrThrow({ where: { id, userId } });
       if (current.status === "cancelled") throw Error("Run cancelled");
       const actionInput = `${context}\nRecent activity:\n${boundedTranscript(transcript)}\nReviewer feedback: ${run.feedback.slice(0, 4000)}`;
@@ -300,13 +300,13 @@ export async function executeRun(userId: string, id: string) {
         where: { id },
         data: {
           plan,
-          toolRounds: step + 1,
+          toolRounds: step,
           stage: action.action === "test" ? "validation" : "execution",
           lastProgressAt: new Date(),
         },
       });
       await log(
-        `Step ${step + 1}: ${action.action} ${action.path ?? action.command ?? ""}`,
+        `Step ${step}: ${action.action} ${action.path ?? action.command ?? ""}`,
       );
       let result = "";
       if (action.action === "finish") {
@@ -348,11 +348,12 @@ export async function executeRun(userId: string, id: string) {
               repairBudgetExceeded = true;
             await db.run.update({ where: { id }, data: { repairAttempts } });
           }
-          validationPassed =
-            (report.exitCode === 0 && isMeaningfulValidation(action.command)) ||
-            validationPassed;
+          // The most recent real validation decides; a later failure revokes an earlier pass.
+          if (isMeaningfulValidation(action.command))
+            validationPassed = report.exitCode === 0;
         } catch {
           repairing = true;
+          if (isMeaningfulValidation(action.command)) validationPassed = false;
         }
         if (repairBudgetExceeded)
           throw Error(
@@ -458,7 +459,7 @@ export async function executeRun(userId: string, id: string) {
     const fresh = await db.run.findUniqueOrThrow({ where: { id } });
     if (fresh.status !== "cancelled") {
       const message = e instanceof Error ? e.message : "Agent failed";
-      const blocked = /timeout|time limit/i.test(message);
+      const blocked = /timeout|time limit|step limit/i.test(message);
       await db.run.update({
         where: { id },
         data: {
