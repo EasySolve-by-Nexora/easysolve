@@ -427,3 +427,23 @@ it("returns the same recovery response for unknown, known and undeliverable acco
   if (original) process.env.RECOVERY_WEBHOOK_URL = original;
   await db.rateLimit.deleteMany({ where: { key: { startsWith: "recover:" } } });
 });
+
+it("revokes every outstanding recovery link when one is redeemed", async () => {
+  const first = `fixture-reset-a-${crypto.randomUUID()}`;
+  const second = `fixture-reset-b-${crypto.randomUUID()}`;
+  for (const token of [first, second])
+    await db.reset.create({
+      data: {
+        id: hash(token),
+        userId: ids[0],
+        expiresAt: new Date(Date.now() + 60000),
+      },
+    });
+  expect(
+    (await call("reset", { token: second, password: "another8" })).status,
+  ).toBe(200);
+  expect(
+    (await call("reset", { token: first, password: "stolen888" })).status,
+  ).toBe(422);
+  expect(await db.reset.count({ where: { userId: ids[0] } })).toBe(0);
+});

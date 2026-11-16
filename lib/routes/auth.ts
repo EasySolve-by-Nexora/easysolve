@@ -129,7 +129,8 @@ export async function handleAuth({
         where: { id: hash(input.token), expiresAt: { gt: new Date() } },
       });
       if (!r) throw new HttpError(422, "Recovery link expired");
-      await tx.reset.delete({ where: { id: r.id } });
+      // Redeeming one link revokes every outstanding recovery link for the user.
+      await tx.reset.deleteMany({ where: { userId: r.userId } });
       await tx.user.update({ where: { id: r.userId }, data: { password } });
       await tx.session.deleteMany({ where: { userId: r.userId } });
     });

@@ -1,7 +1,7 @@
 // Test-only preload (NODE_OPTIONS="--import ./tests/browser/stub-resend.mjs").
-// The worker delivers welcome email through Resend. Browser tests answer any
-// provider requests locally instead of contacting the provider. Every other
-// request is passed through untouched.
+// Signup sends its welcome email through Resend. Browser tests answer provider
+// requests locally instead of contacting the provider. Every other request is
+// passed through untouched.
 const realFetch = globalThis.fetch;
 globalThis.fetch = async (input, init) => {
   const url =

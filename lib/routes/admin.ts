@@ -340,7 +340,25 @@ export async function handleAdmin({ request, path, body, url }: RouteContext) {
           },
         })
       )
-        throw new HttpError(409, "Cancel active runs before removing an identity");
+        throw new HttpError(
+          409,
+          "Cancel active runs before removing an identity",
+        );
+      // Published and awaiting-review runs still hold reserved allowance and can
+      // only be settled through this identity's credential.
+      if (
+        await tx.run.count({
+          where: {
+            userId: targetId,
+            identityId,
+            status: { in: ["awaiting_review", "published"] },
+          },
+        })
+      )
+        throw new HttpError(
+          409,
+          "This identity has runs awaiting review or published. Cancel them or wait until their pull requests are merged or closed before removing it.",
+        );
       await tx.identity.delete({ where: { id: identity.id } });
       await tx.adminAudit.create({
         data: {
