@@ -466,7 +466,7 @@ export function SettingsPage(c: Context) {
 export function AccountPage(c: Context) {
   const [token, setToken] = useState(""),
     [busy, setBusy] = useState(false),
-    [disconnect, setDisconnect] = useState<any>(null),
+    [remove, setRemove] = useState<any>(null),
     [name, setName] = useState(c.data.user.name);
   return (
     <>
@@ -554,9 +554,9 @@ export function AccountPage(c: Context) {
               </label>
               <button
                 className="icon-button"
-                title="Disconnect identity"
-                aria-label={`Disconnect ${i.login}`}
-                onClick={() => setDisconnect(i)}
+                title="Remove identity"
+                aria-label={`Remove ${i.login}`}
+                onClick={() => setRemove(i)}
               >
                 <Trash2 size={16} />
               </button>
@@ -665,29 +665,29 @@ export function AccountPage(c: Context) {
           </div>
         </Panel>
       </div>
-      {disconnect && (
+      {remove && (
         <Modal
-          title={`Disconnect @${disconnect.login}?`}
-          onClose={() => setDisconnect(null)}
+          title={`Remove @${remove.login}?`}
+          onClose={() => setRemove(null)}
         >
           <p>
-            This account will be disabled for use. Its encrypted credential and
-            account slot are retained, along with repositories and history.
-            Revoke the token on GitHub as well if you no longer need it.
+            This permanently removes the saved encrypted credential and frees
+            its account slot. Existing repositories and run history are kept.
+            Revoke the token on GitHub separately if you no longer need it.
           </p>
           <div className="modal-actions">
-            <Button variant="secondary" onClick={() => setDisconnect(null)}>
-              Keep connected
+            <Button variant="secondary" onClick={() => setRemove(null)}>
+              Keep identity
             </Button>
             <Button
               onClick={() =>
                 void c
-                  .act(`identities/${disconnect.id}`, {}, "DELETE")
-                  .then(() => setDisconnect(null))
+                  .act(`identities/${remove.id}/purge`, {}, "DELETE")
+                  .then(() => setRemove(null))
                   .catch(() => {})
               }
             >
-              Disconnect identity
+              Remove identity
             </Button>
           </div>
         </Modal>
