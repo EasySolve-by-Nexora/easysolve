@@ -191,7 +191,12 @@ export async function handleContribution({
         });
         if (current.status === "posted")
           throw new HttpError(409, "Comment already posted");
-        if (current.status === "posting")
+        // A crash mid-post must not wedge the application forever. The comment
+        // marker below makes re-posting after the grace period idempotent.
+        if (
+          current.status === "posting" &&
+          Date.now() - current.updatedAt.getTime() < 5 * 60000
+        )
           throw new HttpError(
             409,
             "Comment publication is already in progress",

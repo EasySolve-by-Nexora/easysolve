@@ -4,6 +4,7 @@ import {
   releaseRun,
 } from "./entitlements";
 import { db } from "./db";
+import { reviewCategory } from "./policy";
 import { decrypt, HttpError } from "./security";
 export class GithubRateLimitError extends HttpError {
   constructor(
@@ -225,6 +226,17 @@ async function assignedIssues(gh: GitHub, login: string) {
   }
   return [...merged.values()];
 }
+// GitHub answers 404/410 (gone) or 403 (access lost) for items we can no longer
+// read. Those must not abort a whole sync; rate limits and credential errors
+// still do.
+function isUnreadable(error: unknown) {
+  return (
+    error instanceof HttpError &&
+    !(error instanceof GithubRateLimitError) &&
+    !(error instanceof GithubCredentialError) &&
+    /^GitHub (404|410|403)\b/.test(error.message)
+  );
+}
 export async function syncIssues(userId: string, identityId: string) {
   const gh = await github(userId, identityId);
   const identity = await db.identity.findFirstOrThrow({
@@ -260,6 +272,17 @@ export async function syncIssues(userId: string, identityId: string) {
           ...(i.state === "closed" ? { status: "done" } : {}),
         },
       });
+      // A reopened (or visible-again) issue becomes workable again.
+      if (i.state !== "closed")
+        await db.issue.updateMany({
+          where: {
+            userId,
+            repo,
+            number: i.number,
+            status: { in: ["done", "unavailable"] },
+          },
+          data: { status: "ready" },
+        });
     }
     const imported = new Set(
       issues
@@ -275,17 +298,27 @@ export async function syncIssues(userId: string, identityId: string) {
     });
     for (const old of previous) {
       if (imported.has(`${old.repo}#${old.number}`)) continue;
-      const current = await gh.request(
-        `/repos/${old.repo}/issues/${old.number}`,
-      );
-      await db.issue.update({
-        where: { id: old.id },
-        data: {
-          assignees: current.assignees.map((a: any) => a.login),
-          state: current.state,
-          ...(current.state === "closed" ? { status: "done" } : {}),
-        },
-      });
+      try {
+        const current = await gh.request(
+          `/repos/${old.repo}/issues/${old.number}`,
+        );
+        await db.issue.update({
+          where: { id: old.id },
+          data: {
+            assignees: current.assignees.map((a: any) => a.login),
+            state: current.state,
+            ...(current.state === "closed" ? { status: "done" } : {}),
+          },
+        });
+      } catch (error) {
+        if (!isUnreadable(error)) throw error;
+        // Deleted, transferred, or access lost: stop retrying it on every sync
+        // and keep it out of run selection until it is visible again.
+        await db.issue.update({
+          where: { id: old.id },
+          data: { assignees: [], status: "unavailable" },
+        });
+      }
     }
     const published = await db.run.findMany({
       where: {
@@ -296,26 +329,41 @@ export async function syncIssues(userId: string, identityId: string) {
       },
     });
     for (const run of published) {
-      const pr = await gh.request(`/repos/${run.repo}/pulls/${run.prNumber}`);
-      if (pr.merged) {
-        await creditMergedRun(userId, run.id);
-        await db.run.update({
-          where: { id: run.id },
-          data: { status: "completed" },
-        });
-        await db.issue.updateMany({
-          where: { userId, id: { in: run.issueIds as string[] } },
-          data: { status: "done" },
-        });
-      } else if (pr.state === "closed") {
-        await releaseRun(run.id);
-        await db.run.update({
-          where: { id: run.id },
-          data: {
-            status: "cancelled",
-            error: "Pull request closed without merge",
-          },
-        });
+      try {
+        const pr = await gh.request(`/repos/${run.repo}/pulls/${run.prNumber}`);
+        if (pr.merged) {
+          await creditMergedRun(userId, run.id);
+          await db.run.update({
+            where: { id: run.id },
+            data: { status: "completed" },
+          });
+          await db.issue.updateMany({
+            where: { userId, id: { in: run.issueIds as string[] } },
+            data: { status: "done" },
+          });
+        } else if (pr.state === "closed") {
+          await releaseRun(run.id);
+          await db.run.update({
+            where: { id: run.id },
+            data: {
+              status: "cancelled",
+              error: "Pull request closed without merge",
+            },
+          });
+          // The issues are free to be worked on again.
+          await db.issue.updateMany({
+            where: {
+              userId,
+              id: { in: run.issueIds as string[] },
+              status: "in_progress",
+              state: "open",
+            },
+            data: { status: "ready" },
+          });
+        }
+      } catch (error) {
+        // One unreadable PR must not stop the others from being settled.
+        if (!isUnreadable(error)) throw error;
       }
     }
     await db.identity.update({
@@ -331,58 +379,93 @@ export async function syncIssues(userId: string, identityId: string) {
     throw e;
   }
 }
+// Pages through every check run for a commit (GitHub returns 30 by default).
+async function allCheckRuns(gh: GitHub, repo: string, sha: string) {
+  const runs: any[] = [];
+  for (let page = 1; page <= 10; page++) {
+    const result = await gh.request<{
+      total_count?: number;
+      check_runs?: any[];
+    }>(`/repos/${repo}/commits/${sha}/check-runs?per_page=100&page=${page}`);
+    const batch = result.check_runs ?? [];
+    runs.push(...batch);
+    if (batch.length < 100 || runs.length >= (result.total_count ?? 0))
+      return runs;
+  }
+  // Too many to inspect: treat as not ready rather than risk missing a failure.
+  throw new HttpError(
+    422,
+    "This commit has more than 1,000 check runs; review it on GitHub.",
+  );
+}
+export async function reviewPullRequest(
+  gh: GitHub,
+  repoFullName: string,
+  identityId: string,
+  number: number,
+) {
+  const pr = await gh.request(`/repos/${repoFullName}/pulls/${number}`);
+  const reviews = await gh.pages(
+    `/repos/${repoFullName}/pulls/${pr.number}/reviews`,
+  );
+  const runs = await allCheckRuns(gh, repoFullName, pr.head.sha);
+  const statuses = await gh.request(
+    `/repos/${repoFullName}/commits/${pr.head.sha}/status`,
+  );
+  const combined =
+    runs.some(
+      (c: any) =>
+        c.status === "completed" &&
+        !["success", "neutral", "skipped"].includes(c.conclusion),
+    ) || ["failure", "error"].includes(statuses.state)
+      ? "failure"
+      : runs.some((c: any) => c.status !== "completed") ||
+          (statuses.state === "pending" && statuses.total_count > 0)
+        ? "pending"
+        : runs.length || statuses.total_count
+          ? "success"
+          : "pending";
+  return {
+    repo: repoFullName,
+    identityId,
+    number: pr.number as number,
+    title: pr.title,
+    url: pr.html_url,
+    head: pr.head.sha as string,
+    author: pr.user.login,
+    draft: !!pr.draft,
+    mergeable: pr.mergeable,
+    mergeableState: pr.mergeable_state ?? null,
+    checks: combined,
+    category: reviewCategory(pr, reviews, pr.head.sha, combined),
+    additions: pr.additions,
+    deletions: pr.deletions,
+    updatedAt: pr.updated_at,
+  };
+}
 export async function reviewQueue(userId: string) {
   const repos = await db.repository.findMany({ where: { userId } });
-  const result: any[] = [];
+  const result: Awaited<ReturnType<typeof reviewPullRequest>>[] = [];
   for (const repo of repos) {
-    const gh = await github(userId, repo.identityId);
-    const prs = await gh.pages(`/repos/${repo.fullName}/pulls?state=open`);
-    for (const summary of prs) {
-      const pr = await gh.request(
-        `/repos/${repo.fullName}/pulls/${summary.number}`,
-      );
-      const reviews = await gh.pages(
-        `/repos/${repo.fullName}/pulls/${pr.number}/reviews`,
-      );
-      const checks = await gh.request(
-        `/repos/${repo.fullName}/commits/${pr.head.sha}/check-runs`,
-      );
-      const statuses = await gh.request(
-        `/repos/${repo.fullName}/commits/${pr.head.sha}/status`,
-      );
-      const runs = checks.check_runs ?? [];
-      const combined =
-        runs.some(
-          (c: any) =>
-            c.status === "completed" &&
-            !["success", "neutral", "skipped"].includes(c.conclusion),
-        ) || ["failure", "error"].includes(statuses.state)
-          ? "failure"
-          : runs.some((c: any) => c.status !== "completed") ||
-              (statuses.state === "pending" && statuses.total_count > 0)
-            ? "pending"
-            : runs.length || statuses.total_count
-              ? "success"
-              : "pending";
-      const { reviewCategory } = await import("./policy");
-      result.push({
-        repo: repo.fullName,
-        identityId: repo.identityId,
-        number: pr.number,
-        title: pr.title,
-        url: pr.html_url,
-        head: pr.head.sha,
-        author: pr.user.login,
-        draft: !!pr.draft,
-        mergeable: pr.mergeable,
-        mergeableState: pr.mergeable_state ?? null,
-        checks: combined,
-        category: reviewCategory(pr, reviews, pr.head.sha, combined),
-        additions: pr.additions,
-        deletions: pr.deletions,
-        updatedAt: pr.updated_at,
-      });
+    let gh: GitHub;
+    try {
+      gh = await github(userId, repo.identityId);
+    } catch (error) {
+      // A repository whose identity is disconnected, unusable or removed must
+      // not hide every other repository's queue.
+      if (error instanceof HttpError && error.status === 422) continue;
+      throw error;
     }
+    const prs = await gh.pages(`/repos/${repo.fullName}/pulls?state=open`);
+    for (const summary of prs)
+      result.push(
+        await reviewPullRequest(
+          gh,
+          repo.fullName,
+          repo.identityId,
+          summary.number,
+        ),
+      );
   }
   return result;
 }
@@ -404,27 +487,36 @@ export async function syncRepositoryStats(
     });
     throw new HttpError(403, "Management permission is no longer available");
   }
-  const issues = (
-    await gh.pages(`/repos/${repo.fullName}/issues?state=open`)
-  ).filter((i) => !i.pull_request);
-  const prs = await gh.pages(
-    `/repos/${repo.fullName}/pulls?state=all&sort=updated`,
+  // Counts come from the search API so large repositories (thousands of PRs)
+  // never hit the pagination ceiling.
+  const count = async (query: string) =>
+    (
+      await gh.request<{ total_count?: number }>(
+        `/search/issues?q=${encodeURIComponent(`repo:${repo.fullName} ${query}`)}&per_page=1`,
+      )
+    ).total_count ?? 0;
+  const openIssues = await count("is:issue is:open");
+  const unassignedIssues = await count("is:issue is:open no:assignee");
+  const openPRs = await count("is:pr is:open");
+  const mergedPRs = await count("is:pr is:merged");
+  const recent = await gh.request<any[]>(
+    `/repos/${repo.fullName}/pulls?state=all&sort=updated&direction=desc&per_page=8`,
   );
   const contributors = await gh.request(
     `/repos/${repo.fullName}/contributors?per_page=10`,
   );
   const stats = {
-    openIssues: issues.length,
-    assignedIssues: issues.filter((i) => i.assignees.length).length,
-    openPRs: prs.filter((p) => p.state === "open").length,
-    mergedPRs: prs.filter((p) => p.merged_at).length,
+    openIssues,
+    assignedIssues: Math.max(0, openIssues - unassignedIssues),
+    openPRs,
+    mergedPRs,
     contributors: Array.isArray(contributors)
       ? contributors.map((c: any) => ({
           login: c.login,
           contributions: c.contributions,
         }))
       : [],
-    recentPRs: prs.slice(0, 8).map((p) => ({
+    recentPRs: (Array.isArray(recent) ? recent : []).map((p) => ({
       title: p.title,
       number: p.number,
       author: p.user.login,

@@ -59,6 +59,7 @@ export async function handleAccount({
       data: { password: await bcrypt.hash(input.password, 12) },
     });
     await db.session.deleteMany({ where: { userId: u.id } });
+    await db.reset.deleteMany({ where: { userId: u.id } });
     await session(u.id);
     return json({ ok: true });
   }
@@ -116,7 +117,13 @@ export async function handleAccount({
         throw new HttpError(409, "Cancel active runs before disconnecting");
       await db.identity.update({
         where: { id: identity.id },
-        data: { active: false, usable: false, status: "disconnected" },
+        // Disconnect revokes our copy of the credential, not just the flags.
+        data: {
+          active: false,
+          usable: false,
+          status: "disconnected",
+          token: "",
+        },
       });
       return json({ ok: true });
     }

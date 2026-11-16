@@ -55,6 +55,8 @@ export class Sandbox {
     await command([
       "run",
       "-d",
+      // Removed automatically when it stops, so crashed workers leave no exited containers.
+      "--rm",
       "--name",
       this.name,
       "--network",

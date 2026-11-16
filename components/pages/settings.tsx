@@ -257,7 +257,7 @@ export function UsagePage(c: Context) {
             </p>
             <div>
               <span>Requests</span>
-              <strong>{u.length}</strong>
+              <strong>{sum("requests").toLocaleString()}</strong>
             </div>
           </div>
         </Panel>
@@ -671,9 +671,11 @@ export function AccountPage(c: Context) {
           onClose={() => setDisconnect(null)}
         >
           <p>
-            This account will be disabled for use. Its encrypted credential and
-            account slot are retained, along with repositories and history.
-            Revoke the token on GitHub as well if you no longer need it.
+            This account will be disabled for use and EasySolve will delete its
+            stored credential. It cannot be re-enabled without reconnecting it
+            with a new token. Its account slot, repositories, and history are
+            retained. Revoke the token on GitHub as well if you no longer need
+            it.
           </p>
           <div className="modal-actions">
             <Button variant="secondary" onClick={() => setDisconnect(null)}>

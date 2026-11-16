@@ -76,7 +76,11 @@ export function repoName(value: string) {
     .replace(/^https:\/\/github.com\//, "")
     .replace(/\/$/, "")
     .replace(/\.git$/, "");
-  if (!/^[\w.-]+\/[\w.-]+$/.test(clean))
+  // "." and ".." are valid characters but would rewrite the GitHub API path.
+  if (
+    !/^[\w.-]+\/[\w.-]+$/.test(clean) ||
+    clean.split("/").some((part) => part === "." || part === "..")
+  )
     throw new z.ZodError([
       {
         code: "custom",
@@ -85,19 +89,6 @@ export function repoName(value: string) {
       },
     ]);
   return clean;
-}
-export function groups<T extends { repo: string }>(issues: T[]) {
-  const map = new Map<string, T[]>();
-  for (const issue of issues) {
-    const same = map.get(issue.repo) ?? [];
-    same.push(issue);
-    map.set(issue.repo, same);
-  }
-  return [...map.values()].flatMap((items) =>
-    Array.from({ length: Math.ceil(items.length / 4) }, (_, i) =>
-      items.slice(i * 4, i * 4 + 4),
-    ),
-  );
 }
 export function monthStart(now = new Date()) {
   return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));

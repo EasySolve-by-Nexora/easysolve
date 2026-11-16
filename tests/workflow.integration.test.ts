@@ -444,7 +444,7 @@ it("publishes via a verified contributor fork when upstream write access is abse
       artifacts: files,
       plan: "Fix sum",
       diff: "diff",
-      tests: '{"exitCode":0,"stdout":"pass","stderr":""}',
+      tests: '$ npm test\n{"exitCode":0,"stdout":"pass","stderr":""}\n\n',
     },
   });
   let forked = false;
@@ -584,7 +584,7 @@ it("promotes only a validated same-run draft without creating a duplicate", asyn
       baseSha: "base",
       headSha: sha,
       approvedSha: sha,
-      tests: '{"exitCode":0,"stdout":"pass","stderr":""}',
+      tests: '$ npm test\n{"exitCode":0,"stdout":"pass","stderr":""}\n\n',
     },
   });
   gh.request.mockImplementation(async (path: string, method?: string) => {
@@ -645,7 +645,7 @@ it("validates an existing PR against the approved patch before recovering public
       headSha: sha,
       approvedSha: sha,
       diff: "diff",
-      tests: '{"exitCode":0,"stdout":"pass","stderr":""}',
+      tests: '$ npm test\n{"exitCode":0,"stdout":"pass","stderr":""}\n\n',
     },
   });
   let matching = false;

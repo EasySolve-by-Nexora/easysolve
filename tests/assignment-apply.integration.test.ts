@@ -1,6 +1,7 @@
 import "dotenv/config";
 import { afterAll, beforeAll, expect, it, vi } from "vitest";
-import { applyProposal } from "../lib/assignments";
+import { applyProposal, propose } from "../lib/assignments";
+import { HttpError } from "../lib/security";
 import { handleContribution } from "../lib/routes/contribution";
 import { db } from "../lib/db";
 const { gh } = vi.hoisted(() => ({ gh: { request: vi.fn(), pages: vi.fn() } }));
@@ -117,4 +118,158 @@ it("claims an application before posting so concurrent retries cannot duplicate 
   releaseComments();
   await first;
   expect(gh.request.mock.calls.filter((c) => c[1] === "POST")).toHaveLength(1);
+});
+
+const entry = (over: Record<string, unknown>) => ({
+  number: 1,
+  title: "Issue",
+  login: "Alice",
+  existing: 0,
+  state: "pending",
+  ...over,
+});
+const proposalFor = (entries: unknown[]) =>
+  db.proposal.create({
+    data: {
+      userId,
+      identityId: "fixture",
+      repo: "a/b",
+      entries: entries as any,
+    },
+  });
+
+it("treats GitHub logins case-insensitively when applying", async () => {
+  const proposal = await proposalFor([entry({ login: "Alice" })]);
+  gh.pages.mockResolvedValue([]);
+  gh.request.mockReset();
+  gh.request.mockImplementation(async (path: string, method?: string) =>
+    method === "POST"
+      ? { assignees: [{ login: "alice" }] }
+      : { state: "open", assignees: [] },
+  );
+  const result = await applyProposal(userId, proposal.id);
+  expect(result.state).toBe("applied");
+  expect((result.entries as any[])[0]).toMatchObject({ state: "applied" });
+});
+
+it("counts wave proposals like the preview did and lists each login once", async () => {
+  // Five non-wave issues already assigned must not block a wave-only assignment.
+  const nonWave = Array.from({ length: 5 }, (_, i) => ({
+    number: 100 + i,
+    labels: [{ name: "bug" }],
+  }));
+  const proposal = await proposalFor([
+    entry({ number: 11, login: "carol", waveOnly: true }),
+    entry({ number: 12, login: "carol", waveOnly: true }),
+  ]);
+  gh.pages.mockReset();
+  gh.pages.mockResolvedValue(nonWave);
+  gh.request.mockReset();
+  gh.request.mockImplementation(async (path: string, method?: string) =>
+    method === "POST"
+      ? { assignees: [{ login: "carol" }] }
+      : { state: "open", assignees: [] },
+  );
+  const result = await applyProposal(userId, proposal.id);
+  expect(result.state).toBe("applied");
+  expect(gh.pages).toHaveBeenCalledTimes(1);
+});
+
+it("stops at the configured limit using locally tracked counts", async () => {
+  const proposal = await proposalFor(
+    [21, 22, 23, 24].map((number) => entry({ number, login: "dave" })),
+  );
+  gh.pages.mockReset();
+  gh.pages.mockResolvedValue([]);
+  gh.request.mockReset();
+  gh.request.mockImplementation(async (path: string, method?: string) =>
+    method === "POST"
+      ? { assignees: [{ login: "dave" }] }
+      : { state: "open", assignees: [] },
+  );
+  const result = await applyProposal(userId, proposal.id);
+  const states = (result.entries as any[]).map((e) => e.state);
+  // Default Wave limit is 3 assignments per person.
+  expect(states.filter((s) => s === "applied")).toHaveLength(3);
+  expect((result.entries as any[])[3].error).toBe("Assignment limit reached");
+});
+
+it("keeps a proposal when one username cannot be assigned and reports it", async () => {
+  gh.pages.mockReset();
+  gh.pages.mockResolvedValue([
+    { number: 1, title: "Open", assignees: [], labels: [{ name: "Wave" }] },
+  ]);
+  gh.request.mockReset();
+  gh.request.mockImplementation(async (path: string) => {
+    if (path.endsWith("/ghost"))
+      throw new HttpError(502, "GitHub 404: request failed");
+    return {};
+  });
+  const proposal = await propose(userId, {
+    identityId: "fixture",
+    repo: "a/b",
+    usernames: ["ghost", "alice"],
+    numbers: [],
+    labels: "",
+    additional: 1,
+    waveOnly: true,
+  });
+  expect(proposal.notAssignable).toEqual(["ghost"]);
+  expect((proposal.entries as any[]).map((e) => e.login)).toEqual(["alice"]);
+  gh.request.mockImplementation(async () => {
+    throw new HttpError(502, "GitHub 404: request failed");
+  });
+  await expect(
+    propose(userId, {
+      identityId: "fixture",
+      repo: "a/b",
+      usernames: ["ghost"],
+      numbers: [],
+      labels: "",
+      additional: 1,
+      waveOnly: false,
+    }),
+  ).rejects.toThrow("does not allow assigning ghost");
+});
+
+it("recovers an application stuck in posting after a crash, but not one in progress", async () => {
+  const application = await db.application.create({
+    data: {
+      userId,
+      identityId: "fixture",
+      repo: "a/b",
+      number: 77,
+      title: "Stuck",
+      draft: "I can fix this.",
+      status: "posting",
+    },
+  });
+  const context = {
+    request: new Request("http://localhost/api/applications/post", {
+      method: "POST",
+    }),
+    path: ["applications", application.id, "post"],
+    body: { draft: "I can fix this." },
+    url: new URL("http://localhost/api/applications/post"),
+    u: await db.user.findUniqueOrThrow({ where: { id: userId } }),
+  } as any;
+  gh.pages.mockReset();
+  gh.pages.mockResolvedValue([]);
+  gh.request.mockReset();
+  gh.request.mockResolvedValue({
+    html_url: "https://github.com/a/b/issues/77#issuecomment-9",
+  });
+  await expect(handleContribution(context)).rejects.toThrow(
+    "already in progress",
+  );
+  await db.application.update({
+    where: { id: application.id },
+    data: { updatedAt: new Date(Date.now() - 10 * 60000) },
+  });
+  const response = await handleContribution(context);
+  expect(response?.status).toBe(200);
+  expect(
+    (await db.application.findUniqueOrThrow({ where: { id: application.id } }))
+      .status,
+  ).toBe("posted");
 });

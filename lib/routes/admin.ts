@@ -122,14 +122,11 @@ export async function handleAdmin({ request, path, body, url }: RouteContext) {
         by: ["status"],
         _count: true,
       });
-      const revenueReceipts = await db.paymentReceipt.findMany({
-        where: { network: "mainnet", status: "verified" },
-        select: { amount: true },
-      });
-      const verifiedRevenueUnits = revenueReceipts.reduce(
-        (n, r) => n + BigInt(r.amount.replace(".", "")),
-        0n,
-      );
+      // Summed in the database in 1e-7 units; never loads receipts into memory.
+      const [{ units }] = await db.$queryRaw<{ units: string }[]>`
+        SELECT COALESCE(SUM(REPLACE("amount", '.', '')::numeric), 0)::text AS units
+        FROM "PaymentReceipt" WHERE "network" = 'mainnet' AND "status" = 'verified'`;
+      const verifiedRevenueUnits = BigInt(units);
       return json({
         basicUsers: users - activePro,
         activePro,
@@ -340,7 +337,25 @@ export async function handleAdmin({ request, path, body, url }: RouteContext) {
           },
         })
       )
-        throw new HttpError(409, "Cancel active runs before removing an identity");
+        throw new HttpError(
+          409,
+          "Cancel active runs before removing an identity",
+        );
+      // Published and awaiting-review runs still hold reserved allowance and can
+      // only be settled through this identity's credential.
+      if (
+        await tx.run.count({
+          where: {
+            userId: targetId,
+            identityId,
+            status: { in: ["awaiting_review", "published"] },
+          },
+        })
+      )
+        throw new HttpError(
+          409,
+          "This identity has runs awaiting review or published. Cancel them or wait until their pull requests are merged or closed before removing it.",
+        );
       await tx.identity.delete({ where: { id: identity.id } });
       await tx.adminAudit.create({
         data: {

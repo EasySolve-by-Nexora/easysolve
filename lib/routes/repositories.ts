@@ -130,13 +130,24 @@ export async function handleRepositories({
     const i = await gh.request(`/repos/${repo}/issues/${input.number}`);
     if (i.pull_request)
       throw new HttpError(422, "This number is a pull request");
+    // Use GitHub's canonical casing so an import and a later sync are the same row.
+    const canonical =
+      typeof i.repository_url === "string"
+        ? (i.repository_url.split("/repos/")[1] ?? repo)
+        : repo;
     return json(
       await db.issue.upsert({
-        where: { userId_repo_number: { userId: u.id, repo, number: i.number } },
+        where: {
+          userId_repo_number: {
+            userId: u.id,
+            repo: canonical,
+            number: i.number,
+          },
+        },
         create: {
           userId: u.id,
           identityId: input.identityId,
-          repo,
+          repo: canonical,
           number: i.number,
           title: i.title,
           body: i.body ?? "",
@@ -144,7 +155,13 @@ export async function handleRepositories({
           assignees: i.assignees.map((a: any) => a.login),
           url: i.html_url,
         },
-        update: { title: i.title },
+        update: {
+          title: i.title,
+          body: i.body ?? "",
+          labels: i.labels.map((l: any) => l.name),
+          assignees: i.assignees.map((a: any) => a.login),
+          state: i.state,
+        },
       }),
     );
   }

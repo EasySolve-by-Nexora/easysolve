@@ -287,8 +287,9 @@ it("denies non-admin connection tests and binds verification to key/model", asyn
 });
 it("enforces input and provider rate ceilings without per-run AI budgets", async () => {
   process.env.AI_MAX_INPUT_BYTES = "1";
-  await expect(ai(userId, "input", "hello", "concise", "budget-fixture"))
-    .rejects.toBeInstanceOf(Error);
+  await expect(
+    ai(userId, "input", "hello", "concise", "budget-fixture"),
+  ).rejects.toBeInstanceOf(Error);
   delete process.env.AI_MAX_INPUT_BYTES;
 
   process.env.AI_JOB_MAX_TOKENS = "1";
@@ -382,3 +383,31 @@ it.each([
     expect(result.activity).toEqual([]);
   },
 );
+
+it("does not mark the provider as failed when the user cancels a request", async () => {
+  const marked = () =>
+    db.providerConnection.count({ where: { verifiedAt: new Date(0) } });
+  const before = await marked();
+  const controller = new AbortController();
+  create.mockImplementationOnce(async () => {
+    controller.abort();
+    throw Object.assign(new Error("aborted"), { name: "AbortError" });
+  });
+  await expect(
+    ai(
+      userId,
+      "cancelled",
+      "hello",
+      "concise",
+      undefined,
+      undefined,
+      undefined,
+      {
+        messages: [],
+        calls: [],
+        signal: controller.signal,
+      },
+    ),
+  ).rejects.toBeInstanceOf(Error);
+  expect(await marked()).toBe(before);
+});

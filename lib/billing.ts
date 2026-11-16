@@ -338,7 +338,9 @@ export async function reconcilePayments() {
     Math.min(100, Number(process.env.PAYMENT_WATCH_BATCH) || 20),
   );
   const cursors = await db.paymentCursor.findMany({
-    where: { availableAt: { lte: new Date() }, attempts: { lt: 8 } },
+    // No attempt ceiling: the backoff caps at about an hour, so a long provider
+    // outage delays watching instead of silently ending it.
+    where: { availableAt: { lte: new Date() } },
     take: 2,
   });
   for (const candidate of cursors) {

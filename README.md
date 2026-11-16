@@ -69,7 +69,8 @@ Copy the documented names in [.env.example](.env.example); never commit `.env`.
 | `PLAN_MAX_TOKENS`                                                 | Server-enforced monthly token ceiling per user, default 1,000,000                                     |
 | `SANDBOX_IMAGE`                                                   | Trusted locally built execution image, default `easysolve-sandbox:local`                              |
 | `WORKER_CONCURRENCY`                                              | Global active job ceiling, default 10; one worker dispatches jobs concurrently                        |
-| `WORKER_ACCOUNT_CONCURRENCY`                                      | Per-account active job ceiling, default 10                                                            |
+| `WORKER_ACCOUNT_CONCURRENCY`                                      | Per-account active job ceiling, default 1 (shared AI/GitHub limits)             |
+| `AGENT_MAX_STEPS`, `AGENT_MAX_SECONDS`                            | Per-run ceilings on model steps (default 40, max 200) and seconds (default 1500) |
 | `RECOVERY_WEBHOOK_URL`                                            | Legacy optional recovery adapter; Resend is used whenever `RESEND_API_KEY` is configured              |
 | `RECOVERY_WEBHOOK_SECRET`                                         | Legacy adapter bearer secret                                                                          |
 | `COOKIE_SECURE`                                                   | Defaults true for production; false only for local HTTP production-build tests                        |

@@ -68,6 +68,15 @@ export async function chooseGithubAccounts(userId: string, ids: string[]) {
       unique.length
     )
       throw new HttpError(404, "Identity not found");
+    if (
+      await tx.identity.count({
+        where: { userId, id: { in: unique }, status: "disconnected" },
+      })
+    )
+      throw new HttpError(
+        409,
+        "A disconnected GitHub account has no saved credential. Reconnect it with a new token first.",
+      );
     await tx.identity.updateMany({
       where: { userId },
       data: { usable: false },

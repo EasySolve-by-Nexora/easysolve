@@ -6,6 +6,7 @@ type Email = {
   text: string;
   html: string;
   idempotencyKey: string;
+  timeoutMs?: number;
 };
 
 function appUrl() {
@@ -41,7 +42,7 @@ async function sendWithResend(email: Email) {
       text: email.text,
       html: email.html,
     }),
-    signal: AbortSignal.timeout(10000),
+    signal: AbortSignal.timeout(email.timeoutMs ?? 10000),
   });
   if (!response.ok)
     throw new Error(`Resend delivery failed (${response.status})`);
@@ -76,6 +77,8 @@ export async function sendWelcomeEmail({
     html: emailShell(`<h1 style="margin:0 0 16px;font-size:30px;line-height:36px">Welcome to EasySolve, ${firstName}.</h1>
       <p style="margin:0;color:#4f4d47;font-size:16px;line-height:25px">Your workspace is ready. Connect a repository, describe the issue, and let EasySolve help you move it forward.</p>`),
     idempotencyKey: `easysolve-welcome-${userId}`,
+    // Sent inline during signup: never make a new user wait on a slow provider.
+    timeoutMs: 3000,
   });
 }
 

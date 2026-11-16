@@ -2,7 +2,7 @@ import { creditMergedRun } from "../entitlements";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { db } from "../db";
-import { github, reviewQueue } from "../github";
+import { github, reviewPullRequest, reviewQueue } from "../github";
 import { repoName } from "../policy";
 import { HttpError } from "../security";
 import type { RouteContext } from "./types";
@@ -65,18 +65,18 @@ export async function handleReviews({
     )
       throw new HttpError(403, "Repository is not managed");
     const gh = await github(u.id, input.identityId);
-    const pr = await gh.request(`/repos/${repo}/pulls/${input.number}`);
-    if (pr.head.sha !== input.sha)
-      throw new HttpError(
-        409,
-        "PR head changed. Review the new diff before acting.",
-      );
+    const staleHead = () =>
+      new HttpError(409, "PR head changed. Review the new diff before acting.");
     if (input.action === "merge") {
-      const queue = await reviewQueue(u.id);
-      const item = queue.find(
-        (i) => i.repo === repo && i.number === input.number,
+      // Evaluate only this PR (not every repository's queue) at its current head.
+      const item = await reviewPullRequest(
+        gh,
+        repo,
+        input.identityId,
+        input.number,
       );
-      if (item?.category !== "ready")
+      if (item.head !== input.sha) throw staleHead();
+      if (item.category !== "ready")
         throw new HttpError(
           409,
           "PR is not approved with passing checks and mergeability",
@@ -99,6 +99,8 @@ export async function handleReviews({
       }
       return json(merged);
     }
+    const pr = await gh.request(`/repos/${repo}/pulls/${input.number}`);
+    if (pr.head.sha !== input.sha) throw staleHead();
     if (input.action === "changes" && !input.body.trim())
       throw new HttpError(422, "Explain the requested changes");
     return json(

@@ -2,12 +2,15 @@ import { db } from "./db";
 import { github } from "./github";
 import { settings } from "./policy";
 import { HttpError } from "./security";
+// Keeps one apply call comfortably inside its database transaction budget.
+const MAX_ENTRIES = 60;
 export type Entry = {
   number: number;
   title: string;
   login: string;
   existing: number;
   state: string;
+  waveOnly?: boolean;
   error?: string;
 };
 export async function propose(
@@ -36,11 +39,23 @@ export async function propose(
       (!input.waveOnly || i.labels.some((l: any) => /wave/i.test(l.name))),
   );
   const entries: Entry[] = [];
+  const notAssignable: string[] = [];
   let index = 0;
   for (const login of [...new Set(input.usernames)]) {
     if (!/^[\w-]{1,39}$/.test(login))
       throw new HttpError(422, `Invalid username ${login}`);
-    await gh.request(`/repos/${input.repo}/assignees/${login}`);
+    if (entries.length >= MAX_ENTRIES) break;
+    try {
+      await gh.request(`/repos/${input.repo}/assignees/${login}`);
+    } catch (error) {
+      // GitHub answers 404 when the user cannot be assigned here. Report it
+      // without discarding the proposal for everyone else.
+      if (error instanceof HttpError && /^GitHub 404\b/.test(error.message)) {
+        notAssignable.push(login);
+        continue;
+      }
+      throw error;
+    }
     const existing = issues.filter(
       (i) =>
         !i.pull_request &&
@@ -52,7 +67,8 @@ export async function propose(
     for (
       let i = 0;
       i < Math.min(input.additional, Math.max(0, limit - existing)) &&
-      index < candidates.length;
+      index < candidates.length &&
+      entries.length < MAX_ENTRIES;
       i++
     ) {
       const issue = candidates[index++];
@@ -62,17 +78,21 @@ export async function propose(
         login,
         existing,
         state: "pending",
+        waveOnly: input.waveOnly,
       });
     }
   }
   if (!entries.length)
     throw new HttpError(
       422,
-      "No assignable issues within the configured Wave limit",
+      notAssignable.length
+        ? `GitHub does not allow assigning ${notAssignable.join(", ")} in this repository`
+        : "No assignable issues within the configured Wave limit",
     );
-  return db.proposal.create({
+  const proposal = await db.proposal.create({
     data: { userId, identityId: input.identityId, repo: input.repo, entries },
   });
+  return { ...proposal, notAssignable };
 }
 export async function applyProposal(userId: string, id: string) {
   return db.$transaction(
@@ -87,30 +107,48 @@ export async function applyProposal(userId: string, id: string) {
       const limit = settings(u.settings).waveLimit;
       const gh = await github(userId, p.identityId);
       const entries = p.entries as Entry[];
+      const same = (a: string, b: string) =>
+        a.toLowerCase() === b.toLowerCase();
+      // One GitHub listing per login, not one per entry; counted locally as we assign.
+      const assignedCounts = new Map<string, number>();
       for (const entry of entries) {
         if (entry.state === "applied") continue;
         try {
           const issue = await gh.request(
             `/repos/${p.repo}/issues/${entry.number}`,
           );
-          if (issue.assignees.some((a: any) => a.login === entry.login)) {
+          if (issue.assignees.some((a: any) => same(a.login, entry.login))) {
             entry.state = "applied";
             continue;
           }
           if (issue.state !== "open" || issue.assignees.length)
             throw new Error("Issue is no longer unassigned");
-          const all = await gh.pages(
-            `/repos/${p.repo}/issues?state=open&assignee=${encodeURIComponent(entry.login)}`,
-          );
-          if (all.filter((i) => !i.pull_request).length >= limit)
+          const key = `${entry.login.toLowerCase()}:${entry.waveOnly ? "wave" : "all"}`;
+          if (!assignedCounts.has(key)) {
+            const all = await gh.pages(
+              `/repos/${p.repo}/issues?state=open&assignee=${encodeURIComponent(entry.login)}`,
+            );
+            // Count the same way proposals did: only wave-labelled issues for wave proposals.
+            assignedCounts.set(
+              key,
+              all.filter(
+                (i) =>
+                  !i.pull_request &&
+                  (!entry.waveOnly ||
+                    (i.labels ?? []).some((l: any) => /wave/i.test(l.name))),
+              ).length,
+            );
+          }
+          if (assignedCounts.get(key)! >= limit)
             throw new Error("Assignment limit reached");
           const applied = await gh.request(
             `/repos/${p.repo}/issues/${entry.number}/assignees`,
             "POST",
             { assignees: [entry.login] },
           );
-          if (!applied.assignees.some((a: any) => a.login === entry.login))
+          if (!applied.assignees.some((a: any) => same(a.login, entry.login)))
             throw new Error("GitHub did not apply assignment");
+          assignedCounts.set(key, assignedCounts.get(key)! + 1);
           entry.state = "applied";
           delete entry.error;
         } catch (e) {
