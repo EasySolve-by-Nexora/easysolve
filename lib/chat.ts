@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { ai, type AIConversation } from "./ai";
 import { propose } from "./assignments";
+import { boundedChatContext } from "./chat-context";
 import { chatTools } from "./chat-tools";
 import { db } from "./db";
 import { syncIssues } from "./github";
@@ -43,25 +44,47 @@ export async function chat(
     update: {},
   });
   try {
-    const [issues, runs, repos, history] = await Promise.all([
-      db.issue.findMany({ where: { userId }, take: 50 }),
+    const [issueRows, runs, repoRows, history] = await Promise.all([
+      db.issue.findMany({
+        where: { userId },
+        orderBy: { updatedAt: "desc" },
+        take: 50,
+        select: {
+          id: true,
+          repo: true,
+          number: true,
+          title: true,
+          body: true,
+          status: true,
+          state: true,
+          labels: true,
+          assignees: true,
+        },
+      }),
       db.run.findMany({
         where: { userId },
         take: 30,
         orderBy: { createdAt: "desc" },
         select: { id: true, title: true, status: true, prUrl: true },
       }),
-      db.repository.findMany({ where: { userId } }),
+      db.repository.findMany({
+        where: { userId },
+        take: 50,
+        select: { id: true, fullName: true, health: true },
+      }),
       db.message.findMany({
         where: { userId, conversation },
         take: 16,
         orderBy: { createdAt: "desc" },
       }),
     ]);
-    const context = JSON.stringify({
+    // Bodies are untrusted and can be 65k characters each: keep a short excerpt
+    // and bound the whole context so chat never trips the provider input limit.
+    const issues = issueRows.map((i) => ({ ...i, body: i.body.slice(0, 400) }));
+    const context = boundedChatContext({
       issues,
       runs,
-      repos,
+      repos: repoRows,
       history: history.reverse(),
       selectedIdentity: identityId,
     });
@@ -233,7 +256,11 @@ export async function chatAction(
     if (!action.identityId) throw new HttpError(422, "Select a GitHub account");
     result = await syncIssues(userId, action.identityId);
   } else if (action.action === "start_run") {
-    if (!Array.isArray(action.ids) || !action.ids.length || action.ids.length > 40)
+    if (
+      !Array.isArray(action.ids) ||
+      !action.ids.length ||
+      action.ids.length > 40
+    )
       throw new HttpError(422, "Select between 1 and 40 issues");
     const started = await startRunsDetailed(userId, action.ids);
     // Never report success when nothing was queued (allowance, job limit, or

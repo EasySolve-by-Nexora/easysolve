@@ -257,7 +257,7 @@ export function UsagePage(c: Context) {
             </p>
             <div>
               <span>Requests</span>
-              <strong>{u.length}</strong>
+              <strong>{sum("requests").toLocaleString()}</strong>
             </div>
           </div>
         </Panel>

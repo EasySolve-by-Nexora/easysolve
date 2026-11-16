@@ -49,12 +49,16 @@ model Session {
  userId String
  user User @relation(fields:[userId], references:[id], onDelete:Cascade)
  expiresAt DateTime
+ @@index([userId])
+ @@index([expiresAt])
 }
 model Reset {
  id String @id
  userId String
  user User @relation(fields:[userId],references:[id],onDelete:Cascade)
  expiresAt DateTime
+ @@index([userId])
+ @@index([expiresAt])
 }
 model Identity {
  id String @id @default(cuid())
@@ -101,6 +105,8 @@ model Issue {
  updatedAt DateTime @updatedAt
  createdAt DateTime @default(now())
  @@unique([userId,repo,number])
+ @@index([userId,status])
+ @@index([userId,updatedAt])
 }
 model Run {
  id String @id @default(cuid())
@@ -148,6 +154,8 @@ model Run {
  startedAt DateTime?
  finishedAt DateTime?
  updatedAt DateTime @updatedAt
+ @@index([userId,status])
+ @@index([userId,createdAt])
 }
 model Job {
  id String @id @default(cuid())
@@ -164,6 +172,7 @@ model Job {
  createdAt DateTime @default(now())
  updatedAt DateTime @updatedAt
  @@index([status,availableAt])
+ @@index([userId,status])
 }
 model WorkerHeartbeat {
  id String @id
@@ -181,6 +190,7 @@ model Message {
  content String
  activity Json @default("[]")
  createdAt DateTime @default(now())
+ @@index([userId,conversation,createdAt])
 }
 model Usage {
  id String @id @default(cuid())
@@ -197,6 +207,7 @@ model Usage {
  total Int
  createdAt DateTime @default(now())
  @@index([userId,runId])
+ @@index([userId,createdAt])
 }
 model Proposal {
  id String @id @default(cuid())
@@ -222,11 +233,13 @@ model Application {
  languages Json @default("[]")
  status String @default("pending")
  createdAt DateTime @default(now())
+ updatedAt DateTime @default(now()) @updatedAt
 }
 model RateLimit {
  key String @id
  count Int @default(1)
  expiresAt DateTime
+ @@index([expiresAt])
 }
 
 model GithubThrottle {

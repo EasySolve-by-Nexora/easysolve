@@ -231,3 +231,45 @@ it("keeps a proposal when one username cannot be assigned and reports it", async
     }),
   ).rejects.toThrow("does not allow assigning ghost");
 });
+
+it("recovers an application stuck in posting after a crash, but not one in progress", async () => {
+  const application = await db.application.create({
+    data: {
+      userId,
+      identityId: "fixture",
+      repo: "a/b",
+      number: 77,
+      title: "Stuck",
+      draft: "I can fix this.",
+      status: "posting",
+    },
+  });
+  const context = {
+    request: new Request("http://localhost/api/applications/post", {
+      method: "POST",
+    }),
+    path: ["applications", application.id, "post"],
+    body: { draft: "I can fix this." },
+    url: new URL("http://localhost/api/applications/post"),
+    u: await db.user.findUniqueOrThrow({ where: { id: userId } }),
+  } as any;
+  gh.pages.mockReset();
+  gh.pages.mockResolvedValue([]);
+  gh.request.mockReset();
+  gh.request.mockResolvedValue({
+    html_url: "https://github.com/a/b/issues/77#issuecomment-9",
+  });
+  await expect(handleContribution(context)).rejects.toThrow(
+    "already in progress",
+  );
+  await db.application.update({
+    where: { id: application.id },
+    data: { updatedAt: new Date(Date.now() - 10 * 60000) },
+  });
+  const response = await handleContribution(context);
+  expect(response?.status).toBe(200);
+  expect(
+    (await db.application.findUniqueOrThrow({ where: { id: application.id } }))
+      .status,
+  ).toBe("posted");
+});

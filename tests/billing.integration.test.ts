@@ -627,6 +627,20 @@ it("recovers watcher processing after a restart without duplicating payment acti
   expect(
     await db.entitlementGrant.count({ where: { invoiceId: invoice.id } }),
   ).toBe(1);
+  // A long provider outage (more than the former 8-attempt ceiling) must not end watching.
+  await db.paymentCursor.update({
+    where: { id: cursor.id },
+    data: {
+      cursor: cursor.cursor,
+      attempts: 12,
+      error: "outage",
+      availableAt: new Date(0),
+    },
+  });
+  await reconcilePayments();
+  expect(
+    await db.paymentCursor.findUniqueOrThrow({ where: { id: cursor.id } }),
+  ).toMatchObject({ attempts: 0, cursor: t.op.paging_token });
 });
 
 it("bounds failed verification retries and leaves entitlements pending", async () => {

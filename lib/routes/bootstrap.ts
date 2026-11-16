@@ -49,10 +49,12 @@ export async function handleBootstrap({
       db.issue.findMany({
         where: { userId: u.id },
         orderBy: { createdAt: "desc" },
+        take: 2000,
       }),
       db.run.findMany({
         where: { userId: u.id },
         orderBy: { createdAt: "desc" },
+        take: 300,
         select: {
           id: true,
           repo: true,
@@ -63,14 +65,14 @@ export async function handleBootstrap({
           toolRounds: true,
           repairAttempts: true,
           queueWaitMs: true,
-      checkoutMs: true,
-      analysisMs: true,
-      dependencyMs: true,
-      aiMs: true,
-      editMs: true,
+          checkoutMs: true,
+          analysisMs: true,
+          dependencyMs: true,
+          aiMs: true,
+          editMs: true,
           executionMs: true,
           validationMs: true,
-      prPreparationMs: true,
+          prPreparationMs: true,
           lastProgressAt: true,
           branch: true,
           prUrl: true,
@@ -82,14 +84,36 @@ export async function handleBootstrap({
           error: true,
         },
       }),
-      db.message.findMany({
-        where: { userId: u.id },
-        orderBy: { createdAt: "asc" },
-      }),
-      db.usage.findMany({
-        where: { userId: u.id, createdAt: { gte: monthStart() } },
-        orderBy: { createdAt: "desc" },
-      }),
+      // Newest 500 messages, returned oldest-first as the UI expects.
+      db.message
+        .findMany({
+          where: { userId: u.id },
+          orderBy: { createdAt: "desc" },
+          take: 500,
+        })
+        .then((rows) => rows.reverse()),
+      // One row per UTC day with exact sums, not one row per AI request: the
+      // usage page only totals and charts them.
+      db.$queryRaw<
+        {
+          createdAt: Date;
+          input: number;
+          cached: number;
+          reasoning: number;
+          output: number;
+          total: number;
+          requests: number;
+        }[]
+      >`SELECT date_trunc('day', "createdAt") AS "createdAt",
+          COALESCE(SUM("input"), 0)::float8 AS "input",
+          COALESCE(SUM("cached"), 0)::float8 AS "cached",
+          COALESCE(SUM("reasoning"), 0)::float8 AS "reasoning",
+          COALESCE(SUM("output"), 0)::float8 AS "output",
+          COALESCE(SUM("total"), 0)::float8 AS "total",
+          COUNT(*)::float8 AS "requests"
+        FROM "Usage"
+        WHERE "userId" = ${u.id} AND "createdAt" >= ${monthStart()}
+        GROUP BY 1 ORDER BY 1 DESC`,
       db.application.findMany({
         where: { userId: u.id },
         orderBy: { createdAt: "desc" },
@@ -142,9 +166,7 @@ export async function handleBootstrap({
       issues,
       runs,
       messages,
-      usage: usage.map(
-        ({ provider: _provider, model: _model, ...record }) => record,
-      ),
+      usage,
       applications,
       proposals,
       jobs,
