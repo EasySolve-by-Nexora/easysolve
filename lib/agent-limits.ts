@@ -14,7 +14,9 @@ function bounded(
   return Math.min(max, Math.max(min, n));
 }
 
-export function agentLimits(env: NodeJS.ProcessEnv = process.env): AgentLimits {
+export function agentLimits(
+  env: Record<string, string | undefined> = process.env,
+): AgentLimits {
   return {
     maxSteps: bounded(env.AGENT_MAX_STEPS, 40, 1, 200),
     maxMs: bounded(env.AGENT_MAX_SECONDS, 1500, 60, 3600) * 1000,
