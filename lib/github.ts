@@ -453,11 +453,7 @@ export async function reviewQueue(userId: string) {
     } catch (error) {
       // A repository whose identity is disconnected, unusable or removed must
       // not hide every other repository's queue.
-      if (
-        error instanceof HttpError &&
-        (error.status === 422 || error.status === 403)
-      )
-        continue;
+      if (error instanceof HttpError && error.status === 422) continue;
       throw error;
     }
     const prs = await gh.pages(`/repos/${repo.fullName}/pulls?state=open`);

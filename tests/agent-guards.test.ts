@@ -60,6 +60,7 @@ describe("validation guard", () => {
     "CI=true npm run test",
     "node --test sum.test.cjs",
     "cd app && pytest -q",
+    "npm ci && npm test",
     "go test ./...",
     "cargo test",
     "npx vitest run",
@@ -77,6 +78,13 @@ describe("validation guard", () => {
     "ls tests",
     "cat test.txt",
     "grep -r test .",
+    "npm test | tee out.log",
+    "npm test; npm run lint",
+    "npm test\nnpm run lint",
+    "npm test || npm run lint",
+    "npm test &",
+    "npm test && echo done",
+    "",
   ])("rejects a command that cannot prove anything: %s", (command) =>
     expect(isMeaningfulValidation(command)).toBe(false),
   );
