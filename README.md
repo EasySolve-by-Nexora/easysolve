@@ -71,7 +71,9 @@ Copy the documented names in [.env.example](.env.example); never commit `.env`.
 | `WORKER_CONCURRENCY`                                              | Global active job ceiling, default 10; one worker dispatches jobs concurrently                        |
 | `WORKER_ACCOUNT_CONCURRENCY`                                      | Per-account active job ceiling, default 4; GitHub and AI rate limits still apply |
 | `GITHUB_MIN_INTERVAL_MS`                                          | Read-only GitHub request pacing, default 100 ms; mutations stay separately paced |
-| `AGENT_MAX_STEPS`, `AGENT_MAX_SECONDS`                            | Per-run ceilings on model steps (default 40, max 200) and seconds (default 1500) |
+| `AGENT_MAX_STEPS`, `AGENT_MAX_SECONDS`                            | Fast-profile ceilings: 12 model steps and 5 minutes by default                  |
+| `AGENT_COMPLEX_MAX_STEPS`, `AGENT_COMPLEX_MAX_SECONDS`            | Controlled complex-profile ceilings: 24 steps and 15 minutes by default          |
+| `AGENT_MAX_OUTPUT_TOKENS`, `AGENT_COMPLEX_MAX_OUTPUT_TOKENS`      | Structured action-response caps: 1,200 fast / 1,800 complex by default           |
 | `RECOVERY_WEBHOOK_URL`                                            | Legacy optional recovery adapter; Resend is used whenever `RESEND_API_KEY` is configured              |
 | `RECOVERY_WEBHOOK_SECRET`                                         | Legacy adapter bearer secret                                                                          |
 | `COOKIE_SECURE`                                                   | Defaults true for production; false only for local HTTP production-build tests                        |

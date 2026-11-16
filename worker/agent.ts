@@ -5,7 +5,12 @@ import { db } from "../lib/db";
 import { GithubRateLimitError, github } from "../lib/github";
 import { approveRun } from "../lib/queue";
 import { HttpError } from "../lib/security";
-import { assertWithinAgentLimits } from "../lib/agent-limits";
+import {
+  agentLimits,
+  agentOutputTokens,
+  assertWithinAgentLimits,
+} from "../lib/agent-limits";
+import { issueComplexity } from "../lib/policy";
 import {
   hasPassingValidation,
   isMeaningfulValidation,
@@ -186,6 +191,17 @@ export async function executeRun(userId: string, id: string) {
         ),
     );
     const source: Record<string, string> = {};
+    const profile =
+      issueComplexity({
+        title: issues.map((issue) => issue.title).join(" · "),
+        body: issues.map((issue) => issue.body).join("\n"),
+        fileCount: files.length,
+        issueCount: issues.length,
+      }) === "complex"
+        ? "complex"
+        : "fast";
+    const limits = agentLimits(process.env, profile);
+    const maxOutputTokens = agentOutputTokens(process.env, profile);
     const analysisStartedAt = Date.now();
     let bytes = 0;
     for (let offset = 0; offset < files.length; offset += 8) {
@@ -254,7 +270,10 @@ export async function executeRun(userId: string, id: string) {
       validationPassed = false;
     while (true) {
       // Hard step and wall-clock ceilings (AGENT_MAX_STEPS / AGENT_MAX_SECONDS).
-      assertWithinAgentLimits({ steps: step, startedAt: executionStartedAt });
+      assertWithinAgentLimits(
+        { steps: step, startedAt: executionStartedAt },
+        limits,
+      );
       const current = await db.run.findFirstOrThrow({ where: { id, userId } });
       if (current.status === "cancelled") throw Error("Run cancelled");
       const actionInput = `${context}\nRecent activity:\n${boundedTranscript(transcript)}\nReviewer feedback: ${run.feedback.slice(0, 4000)}`;
@@ -272,7 +291,7 @@ export async function executeRun(userId: string, id: string) {
             id,
             undefined,
             agentOutputFormat,
-            { messages: [], calls: [], maxTokens: 2500 },
+            { messages: [], calls: [], maxTokens: maxOutputTokens },
           );
           aiMs += Date.now() - aiStartedAt;
           action = parseAgentResponse(raw);

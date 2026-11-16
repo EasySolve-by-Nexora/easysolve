@@ -128,7 +128,7 @@ Run on desktop Chrome and one phone-width viewport unless noted. Use fresh accou
 | U8 | Cancel while running | Run cancelled, issues back to ready, sandbox container removed | |
 | U9 | Close the PR on GitHub without merging, sync | Issues become startable again | |
 | U10 | Kill the worker mid-run and restart it | Lease expires, run restarts cleanly, no duplicate PR | |
-| U11 | Give an issue the agent cannot solve | Run ends as blocked by `AGENT_MAX_SECONDS` (default 25 min) or `AGENT_MAX_STEPS` (default 40), with a clear message and retry available | |
+| U11 | Give an issue the agent cannot solve | Run ends as blocked by the fast 5-minute / 12-step budget, or the complex 15-minute / 24-step budget, with a clear message and retry available | |
 | U12 | Start two runs from two users at once | Both progress; neither waits for the other to finish | |
 
 ### 3.6 Chat, assignments, reviews

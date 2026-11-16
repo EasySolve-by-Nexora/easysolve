@@ -269,7 +269,10 @@ export async function startRunsDetailed(
           branch: `fix/${crypto.randomUUID()}`,
           mode: config.mode,
           stage: "queued",
-          maxRepairAttempts: config.maxRepairAttempts,
+          // Economy mode allows one repair after a failed validation. Existing
+          // user settings may be higher, but a run never spends beyond this
+          // global safety budget.
+          maxRepairAttempts: Math.min(config.maxRepairAttempts, 1),
         },
       });
       if (run.mode !== "plan")

@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { agentLimits, assertWithinAgentLimits } from "../lib/agent-limits";
+import {
+  agentLimits,
+  agentOutputTokens,
+  assertWithinAgentLimits,
+} from "../lib/agent-limits";
 import {
   hasPassingValidation,
   isMeaningfulValidation,
@@ -27,11 +31,20 @@ describe("waitForActivity", () => {
 
 describe("agent limits", () => {
   it("applies safe defaults and clamps configuration", () => {
-    expect(agentLimits({})).toEqual({ maxSteps: 40, maxMs: 1500000 });
+    expect(agentLimits({})).toEqual({ maxSteps: 12, maxMs: 300000 });
+    expect(agentLimits({}, "complex")).toEqual({
+      maxSteps: 24,
+      maxMs: 900000,
+    });
     expect(
       agentLimits({ AGENT_MAX_STEPS: "100000", AGENT_MAX_SECONDS: "1" }),
     ).toEqual({ maxSteps: 200, maxMs: 60000 });
-    expect(agentLimits({ AGENT_MAX_STEPS: "nonsense" }).maxSteps).toBe(40);
+    expect(agentLimits({ AGENT_MAX_STEPS: "nonsense" }).maxSteps).toBe(12);
+    expect(agentOutputTokens({})).toBe(1200);
+    expect(agentOutputTokens({}, "complex")).toBe(1800);
+    expect(agentOutputTokens({ AGENT_MAX_OUTPUT_TOKENS: "99999" })).toBe(
+      2500,
+    );
   });
   it("stops at the step ceiling", () => {
     const limits = { maxSteps: 3, maxMs: 60000 };
