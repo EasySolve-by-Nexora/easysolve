@@ -38,12 +38,16 @@ origin), `COOKIE_SECURE=true`, `TRUST_PROXY=true` (required; Vercel's edge repla
 Never upload the local `.env` file or print secret values.
 
 Before publishing, back up and migrate the chosen production database using
-`npm run db:migrate` with that database's environment. To preserve existing login,
-admin access and encrypted GitHub credentials, migrate the existing database data
-and retain its encryption key; a fresh database contains none of those accounts.
-Publish using `npx vercel --prod`, then verify `/api/health`, sign-in, `/admin`,
-and the hosted worker. Migration execution is intentionally separate
-from the build to keep preview deployments from modifying production data.
+`npm run db:migrate` with that database's environment. This is a required release
+step: Vercel and Railway builds do not apply Prisma migrations automatically. Run
+it once against the live database before deploying a release that contains a new
+migration, then deploy the web application and worker from the same commit. To
+preserve existing login, admin access and encrypted GitHub credentials, migrate
+the existing database data and retain its encryption key; a fresh database contains
+none of those accounts. Publish using `npx vercel --prod`, then verify
+`/api/health`, sign-in, `/admin`, and the hosted worker. Migration execution is
+intentionally separate from the build to keep preview deployments from modifying
+production data.
 
 ### Docker-capable self-hosting alternative
 

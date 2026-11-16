@@ -48,11 +48,16 @@ Green means all of: typecheck clean, unit and integration suites pass, CI browse
 - Runs: partial start returns 200 with `runs` and `skipped`; nothing started returns 409 with reasons; concurrent starts reserve atomically; chat confirm reports the same reasons.
 - Billing: invoice creation, exact-amount verification, memo/asset/issuer checks, expiry, replay safety.
 - Queue: claim locking, per-account concurrency, lease reclaim, cancel/retry.
-- Signup sends exactly one welcome email and rolls the account back if sending fails.
+- Signup sends at most one welcome email. Delivery is best-effort: an email
+  provider failure must not roll the account back or prevent sign-up.
 
-### 2.3 Coverage gaps (add tests when fixing the matching issue)
+### 2.3 Regression coverage added in this release
 
-No automated test exists today for: the worker loop claiming new jobs while another runs; agent step/time limits; sync resilience to a 404; closed-PR issue status; check-run pagination; case-insensitive assignment logins; identity disconnect freeing a slot. Each fix in section 5 should land with a test.
+The suite covers worker polling while jobs run, agent step/time limits, sync
+resilience to missing issues, closed-PR issue release, check-run pagination,
+case-insensitive assignment logins, and credential deletion on disconnect.
+Disconnected identities deliberately retain their account slot; only an
+administrator can permanently free it.
 
 ## 3. Manual test cases
 
