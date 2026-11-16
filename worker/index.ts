@@ -152,12 +152,16 @@ async function processJob(job: Awaited<ReturnType<typeof claimJob>>) {
     else if (job.kind === "repository_sync")
       await syncRepositoryStats(job.userId, p.repositoryId!);
     else if (job.kind === "sync") await syncIssues(job.userId, p.identityId!);
-    else if (job.kind === "welcome_email")
-      await sendWelcomeEmail({
-        userId: account.id,
-        email: account.email,
-        name: account.name,
-      });
+    else if (job.kind === "welcome_email") {
+      // Welcome email is delivered during signup. Complete jobs queued by
+      // older deployments without requiring an email credential on workers.
+      if (process.env.RESEND_API_KEY)
+        await sendWelcomeEmail({
+          userId: account.id,
+          email: account.email,
+          name: account.name,
+        });
+    }
     else throw Error("Unknown job kind");
     await db.job.updateMany({
       where: { id: job.id, status: "running", attempts: job.attempts },

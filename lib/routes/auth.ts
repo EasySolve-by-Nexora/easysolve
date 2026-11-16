@@ -4,7 +4,6 @@ import { randomBytes } from "node:crypto";
 import { db } from "../db";
 import { throttleAuth } from "../auth-throttle";
 import { sendPasswordResetEmail, sendWelcomeEmail } from "../email";
-import { enqueue } from "../queue";
 import { hash, HttpError, session } from "../security";
 import type { RouteContext } from "./types";
 import {
@@ -38,14 +37,17 @@ export async function handleAuth({
           password: await bcrypt.hash(input.password, 12),
         },
       });
-      // Welcome mail must never make account creation unavailable. The durable
-      // worker retries it, and Resend's idempotency key prevents duplicates.
-      await enqueue(u.id, "welcome_email", `welcome:${u.id}`, {}).catch(
-        (error) =>
-          console.error("Could not queue welcome email", {
-            userId: u.id,
-            reason: error instanceof Error ? error.message : "unknown",
-          }),
+      // Delivery is deliberately best-effort: an email-provider outage must
+      // never prevent a new account from being created or signed in.
+      await sendWelcomeEmail({
+        userId: u.id,
+        email: u.email,
+        name: u.name,
+      }).catch((error) =>
+        console.error("Welcome email delivery failed", {
+          userId: u.id,
+          reason: error instanceof Error ? error.message : "unknown",
+        }),
       );
       await session(u.id);
       return json({ ok: true });

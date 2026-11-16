@@ -72,7 +72,7 @@ it("authenticates an existing account with omitted or null signup-only fields wi
     (await db.user.findUniqueOrThrow({ where: { id: ids[0] } })).password,
   ).toBe(originalHash);
 });
-it("creates an account and queues welcome email without waiting for delivery", async () => {
+it("creates an account when welcome email delivery is available", async () => {
   vi.mocked(fetch).mockClear();
   const signupEmail = `welcome-${crypto.randomUUID()}@example.test`;
   const response = await call("signup", {
@@ -87,12 +87,11 @@ it("creates an account and queues welcome email without waiting for delivery", a
   ids.push(created.id);
   expect(
     await db.job.findUnique({ where: { key: `welcome:${created.id}` } }),
-  ).toMatchObject({
-    userId: created.id,
-    kind: "welcome_email",
-    status: "queued",
-  });
-  expect(fetch).not.toHaveBeenCalled();
+  ).toBeNull();
+  expect(fetch).toHaveBeenCalledWith(
+    "https://api.resend.com/emails",
+    expect.any(Object),
+  );
 });
 it("does not let callers bypass auth throttling with forged forwarded IPs", async () => {
   await db.rateLimit.deleteMany({ where: { key: { startsWith: "auth:" } } });
