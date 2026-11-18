@@ -1,3 +1,4 @@
+import { setTimeout as delay } from "node:timers/promises";
 import { providerConfig, generateAI } from "./providers";
 import type OpenAI from "openai";
 import {
@@ -13,8 +14,91 @@ import {
   settings,
   planLimits,
 } from "./policy";
-import { HttpError, rateLimit } from "./security";
+import { HttpError } from "./security";
 import { providerFingerprint } from "./provider-status";
+
+export async function reserveAIRequestSlots(
+  buckets: readonly { key: string; limit: number }[],
+  windowMs = 60_000,
+): Promise<Date | null> {
+  return db.$transaction(async (tx) => {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('easysolve:ai-request-slots'))`;
+    const rows = await tx.rateLimit.findMany({
+      where: { key: { in: buckets.map(({ key }) => key) } },
+    });
+    const now = Date.now();
+    const active = new Map(
+      rows
+        .filter((row) => row.expiresAt.getTime() > now)
+        .map((row) => [row.key, row]),
+    );
+    let retryAt: Date | null = null;
+    for (const bucket of buckets) {
+      const row = active.get(bucket.key);
+      if (
+        row &&
+        row.count >= bucket.limit &&
+        (!retryAt || row.expiresAt > retryAt)
+      )
+        retryAt = row.expiresAt;
+    }
+    if (retryAt) return retryAt;
+
+    const initial = { count: 1, expiresAt: new Date(now + windowMs) };
+    for (const { key } of buckets) {
+      await tx.rateLimit.upsert({
+        where: { key },
+        create: { key, ...initial },
+        update: active.has(key) ? { count: { increment: 1 } } : initial,
+      });
+    }
+    return null;
+  });
+}
+
+async function waitForAIRequestSlots(
+  userId: string,
+  runId?: string,
+  signal?: AbortSignal,
+) {
+  const buckets = [
+    { key: `ai:${userId}`, limit: limit("AI_REQUESTS_PER_MINUTE", 20) },
+    { key: "ai:global", limit: limit("AI_GLOBAL_REQUESTS_PER_MINUTE", 60) },
+  ];
+  for (;;) {
+    signal?.throwIfAborted();
+    const retryAt = await reserveAIRequestSlots(buckets);
+    if (!retryAt) return;
+    if (!runId)
+      throw Object.assign(
+        new HttpError(
+          429,
+          "AI requests are temporarily busy. Try again shortly.",
+        ),
+        {
+          retryAt,
+        },
+      );
+
+    // Keep the current sandbox and transcript while waiting for capacity.
+    const resumeAt = retryAt.getTime() + 25 + Math.floor(Math.random() * 175);
+    while (Date.now() < resumeAt) {
+      await delay(
+        Math.min(5_000, Math.max(0, resumeAt - Date.now())),
+        undefined,
+        {
+          signal,
+        },
+      );
+      const run = await db.run.findFirst({
+        where: { id: runId, userId },
+        select: { status: true },
+      });
+      if (!run || run.status === "cancelled") throw Error("Run cancelled");
+    }
+  }
+}
+
 export class AllowanceError extends Error {
   constructor(
     message: string,
@@ -47,8 +131,7 @@ export async function ai(
       503,
       `${provider.name} is not configured. Ask the operator to set its server-side API key and restart the app and worker.`,
     );
-  await rateLimit(`ai:${userId}`, limit("AI_REQUESTS_PER_MINUTE", 20));
-  await rateLimit("ai:global", limit("AI_GLOBAL_REQUESTS_PER_MINUTE", 60));
+  await waitForAIRequestSlots(userId, runId, conversation?.signal);
   const admission = await db.$transaction(
     async (tx) => {
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`usage:${userId}`}))`;
