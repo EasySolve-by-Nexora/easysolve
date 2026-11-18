@@ -4,7 +4,7 @@ import { ai } from "../lib/ai";
 import { db } from "../lib/db";
 import { GithubRateLimitError, github } from "../lib/github";
 import { approveRun } from "../lib/queue";
-import { HttpError } from "../lib/security";
+import { HttpError, patchHash } from "../lib/security";
 import {
   agentLimits,
   agentOutputTokens,
@@ -79,6 +79,25 @@ function boundedIssueContext(
 function boundedTranscript(transcript: string[]) {
   return transcript.join("\n").slice(-10000);
 }
+function renderPatch(
+  source: Record<string, string>,
+  changed: Record<string, string>,
+) {
+  return Object.entries(changed)
+    .map(([name, content]) =>
+      [
+        `diff --git a/${name} b/${name}`,
+        source[name] === undefined ? "--- /dev/null" : `--- a/${name}`,
+        `+++ b/${name}`,
+        "@@ full file replacement @@",
+        ...(source[name] === undefined
+          ? []
+          : source[name].split("\n").map((line) => "-" + line)),
+        ...content.split("\n").map((line) => "+" + line),
+      ].join("\n"),
+    )
+    .join("\n");
+}
 function assertPublishable(run: {
   artifacts: unknown;
   diff: string;
@@ -128,6 +147,10 @@ export async function executeRun(userId: string, id: string) {
   });
   if (claimed.count !== 1) return;
   const executionStartedAt = Date.now();
+  const source: Record<string, string> = Object.create(null);
+  const changed: Record<string, string> = Object.create(null);
+  let deadline: ReturnType<typeof setTimeout> | undefined;
+  const execution = new AbortController();
   const queueWaitMs = Math.max(0, executionStartedAt - run.createdAt.getTime());
   let checkoutMs = 0;
   let analysisMs = 0;
@@ -190,7 +213,6 @@ export async function executeRun(userId: string, id: string) {
           file.path,
         ),
     );
-    const source: Record<string, string> = {};
     const profile =
       issueComplexity({
         title: issues.map((issue) => issue.title).join(" · "),
@@ -201,10 +223,18 @@ export async function executeRun(userId: string, id: string) {
         ? "complex"
         : "fast";
     const limits = agentLimits(process.env, profile);
+    if (profile === "fast" && run.mode !== "plan") {
+      limits.maxMs = Math.min(limits.maxMs, 120_000);
+      deadline = setTimeout(
+        () => execution.abort(Error("Execution time limit reached.")),
+        Math.max(0, executionStartedAt + limits.maxMs - Date.now()),
+      );
+    }
     const maxOutputTokens = agentOutputTokens(process.env, profile);
     const analysisStartedAt = Date.now();
     let bytes = 0;
     for (let offset = 0; offset < files.length; offset += 8) {
+      execution.signal.throwIfAborted();
       const loaded = await Promise.all(
         files.slice(offset, offset + 8).map(async (file: any) => {
           const blob = await gh.request(
@@ -220,6 +250,7 @@ export async function executeRun(userId: string, id: string) {
         bytes += Buffer.byteLength(item[1], "utf8");
         if (bytes <= 2000000) source[item[0]] = item[1];
       }
+      if (bytes >= 2000000) break;
     }
     const context = `Issue acceptance criteria (untrusted): ${JSON.stringify(boundedIssueContext(issues))}\nRepository index (search filenames/symbols before reading files):\n${Object.keys(source).join("\n").slice(0, 16000)}\nREADME excerpt:\n${(source["README.md"] ?? "").slice(0, 4000)}`;
     analysisMs = Date.now() - analysisStartedAt;
@@ -251,13 +282,14 @@ export async function executeRun(userId: string, id: string) {
       return;
     }
     const dependencyStartedAt = Date.now();
+    execution.signal.throwIfAborted();
     await sandbox.create();
+    execution.signal.throwIfAborted();
     await sandbox.op({ type: "write", files: source });
     dependencyMs = Date.now() - dependencyStartedAt;
     await log(
       `Loaded ${Object.keys(source).length} files at ${base.object.sha}. Sandbox network disabled.`,
     );
-    const changed: Record<string, string> = {};
     const transcript: string[] = [];
     let repairing = false;
     let step = 0;
@@ -269,6 +301,7 @@ export async function executeRun(userId: string, id: string) {
       finished = false,
       validationPassed = false;
     while (true) {
+      execution.signal.throwIfAborted();
       // Hard step and wall-clock ceilings (AGENT_MAX_STEPS / AGENT_MAX_SECONDS).
       assertWithinAgentLimits(
         { steps: step, startedAt: executionStartedAt },
@@ -291,8 +324,14 @@ export async function executeRun(userId: string, id: string) {
             id,
             undefined,
             agentOutputFormat,
-            { messages: [], calls: [], maxTokens: maxOutputTokens },
+            {
+              messages: [],
+              calls: [],
+              maxTokens: maxOutputTokens,
+              signal: execution.signal,
+            },
           );
+          execution.signal.throwIfAborted();
           aiMs += Date.now() - aiStartedAt;
           action = parseAgentResponse(raw);
           break;
@@ -348,7 +387,8 @@ export async function executeRun(userId: string, id: string) {
           type: "write",
           files: { [action.path]: action.content },
         });
-        changed[action.path] = action.content;
+        if (source[action.path] === action.content) delete changed[action.path];
+        else changed[action.path] = action.content;
         editMs += Date.now() - editStartedAt;
         // A later edit invalidates an earlier check; validate the final patch.
         validationPassed = false;
@@ -397,6 +437,7 @@ export async function executeRun(userId: string, id: string) {
           "Agent stopped after repeating the same action without progress. Review the checkpoint and retry with clarification.",
         );
     }
+    execution.signal.throwIfAborted();
     if (!finished)
       throw Error("Agent stopped without completing the requested work.");
     if (!Object.keys(changed).length)
@@ -405,21 +446,9 @@ export async function executeRun(userId: string, id: string) {
       throw Error(
         "Agent did not complete a passing repository validation command; the run remains failed and can be retried.",
       );
-    const diff = Object.entries(changed)
-      .map(
-        ([name, content]) =>
-          `diff --git a/${name} b/${name}\n--- a/${name}\n+++ b/${name}\n@@ full file replacement @@\n${(
-            source[name] ?? ""
-          )
-            .split("\n")
-            .map((l) => "-" + l)
-            .join("\n")}\n${content
-            .split("\n")
-            .map((l) => "+" + l)
-            .join("\n")}`,
-      )
-      .join("\n");
-    const approvedSha = (await import("../lib/security")).patchHash(changed);
+    clearTimeout(deadline);
+    const diff = renderPatch(source, changed);
+    const approvedSha = patchHash(changed);
     const savedPatch = await db.run.updateMany({
       where: { id, status: "running" },
       data: {
@@ -449,7 +478,10 @@ export async function executeRun(userId: string, id: string) {
       await db.run.update({ where: { id }, data: { stage: "publishing" } });
       await approveRun(userId, id, approvedSha);
     }
-  } catch (e) {
+  } catch (error) {
+    const e: unknown = execution.signal.aborted
+      ? execution.signal.reason
+      : error;
     const aiRateLimited =
       e instanceof HttpError &&
       e.status === 429 &&
@@ -476,16 +508,24 @@ export async function executeRun(userId: string, id: string) {
     }
     await releaseRun(id);
     const fresh = await db.run.findUniqueOrThrow({ where: { id } });
-    if (fresh.status !== "cancelled") {
+    if (fresh.status === "running") {
       const message = e instanceof Error ? e.message : "Agent failed";
       const blocked = /timeout|time limit|step limit/i.test(message);
-      await db.run.update({
-        where: { id },
+      const diff = renderPatch(source, changed);
+      const reason = diff
+        ? `${message} Partial changes are available in the Diff tab.`
+        : message;
+      const stopped = await db.run.updateMany({
+        where: { id, userId, status: "running" },
         data: {
           status: blocked ? "blocked" : "failed",
           stage: blocked ? "blocked" : "failed",
-          blockedReason: blocked ? message : null,
-          error: message,
+          blockedReason: blocked ? reason : null,
+          error: reason,
+          diff,
+          artifacts: changed,
+          headSha: null,
+          approvedSha: null,
           finishedAt: new Date(),
           executionMs: Date.now() - executionStartedAt,
           validationMs: validationStartedAt
@@ -494,13 +534,15 @@ export async function executeRun(userId: string, id: string) {
           lastProgressAt: new Date(),
         },
       });
-      await db.issue.updateMany({
-        where: { userId, id: { in: run.issueIds as string[] } },
-        data: { status: "failed" },
-      });
+      if (stopped.count)
+        await db.issue.updateMany({
+          where: { userId, id: { in: run.issueIds as string[] } },
+          data: { status: "failed" },
+        });
     }
     throw e;
   } finally {
+    clearTimeout(deadline);
     await sandbox.destroy();
   }
 }
