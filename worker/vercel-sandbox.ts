@@ -12,7 +12,18 @@ export class VercelSandbox {
       new URL("../sandbox/runner.mjs", import.meta.url),
       "utf8",
     );
+    const token = process.env.VERCEL_TOKEN?.trim();
+    const teamId = process.env.VERCEL_TEAM_ID?.trim();
+    const projectId = process.env.VERCEL_PROJECT_ID?.trim();
+    if (token && (!teamId || !projectId)) {
+      throw new Error(
+        "Vercel Sandbox access-token authentication requires VERCEL_TEAM_ID and VERCEL_PROJECT_ID.",
+      );
+    }
+    const authentication =
+      token && teamId && projectId ? { token, teamId, projectId } : {};
     this.sandbox = await Sandbox.create({
+      ...authentication,
       image: "vercel/sandbox/universal",
       networkPolicy: "deny-all",
       persistent: false,
