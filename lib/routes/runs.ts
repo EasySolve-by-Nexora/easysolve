@@ -24,17 +24,20 @@ export async function handleRuns({
   const method = request.method;
   if (route === "runs" && method === "POST") {
     const issueIds = z.array(id).min(1).max(40).parse(body.issueIds);
+    const expected = z
+      .array(z.tuple([id, id]))
+      .max(40)
+      .optional()
+      .parse(body.expectedIdentities);
     const result = await startRunsDetailed(u.id, issueIds, {
       grouped: body.grouped === true,
       requireWorker: true,
+      expectedIdentities: expected && new Map(expected),
     });
     // Partial starts stay 200 with both lists; starting nothing is a conflict
     // that carries the skipped reasons.
     if (!result.runs.length)
-      return json(
-        { error: noRunsMessage(result.skipped), ...result },
-        409,
-      );
+      return json({ error: noRunsMessage(result.skipped), ...result }, 409);
     return json(result);
   }
   if (route === "runs/preview" && method === "POST") {
@@ -49,12 +52,24 @@ export async function handleRuns({
     });
     if (!run) throw new HttpError(404, "Run not found");
     if (method === "GET") {
-      const usage = await db.usage.aggregate({
-        where: { userId: u.id, runId: run.id },
-        _sum: { input: true, cached: true, output: true, total: true },
-        _count: true,
-      });
-      return json({ ...run, usage });
+      const [usage, jobs] = await Promise.all([
+        db.usage.aggregate({
+          where: { userId: u.id, runId: run.id },
+          _sum: { input: true, cached: true, output: true, total: true },
+          _count: true,
+        }),
+        db.job.findMany({
+          where: {
+            userId: u.id,
+            key: { in: [`run:${run.id}`, `publish:${run.id}`] },
+            status: "queued",
+          },
+          select: { kind: true, availableAt: true, error: true },
+        }),
+      ]);
+      const pending =
+        jobs.find((job) => job.kind === "publish") ?? jobs[0] ?? null;
+      return json({ ...run, usage, pending });
     }
     if (path[2] === "cancel") {
       await db.$transaction(async (tx) => {
