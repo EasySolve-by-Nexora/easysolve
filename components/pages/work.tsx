@@ -424,6 +424,7 @@ export function IssuesPage(c: Context) {
         (new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()),
     );
   const openPreview = async (ids = selected, group = grouped) => {
+    setGrouped(group);
     setBusy(true);
     try {
       const result = await c.act("runs/preview", {
@@ -440,7 +441,16 @@ export function IssuesPage(c: Context) {
   const solve = async () => {
     setBusy(true);
     try {
-      const result = await c.act("runs", { issueIds: selected, grouped });
+      const result = await c.act("runs", {
+        issueIds: selected,
+        grouped,
+        expectedIdentities: preview.eligible.map(
+          (issue: { id: string; identityId: string }) => [
+            issue.id,
+            issue.identityId,
+          ],
+        ),
+      });
       setSelected([]);
       setConfirm(false);
       setPreview(null);
@@ -703,13 +713,13 @@ export function IssuesPage(c: Context) {
             {(preview?.eligible?.length ?? selected.length) === 1
               ? ""
               : "s"}{" "}
-            will start as independent run
-            {(preview?.eligible?.length ?? selected.length) === 1 ? "" : "s"}.
+            can be queued.
           </p>
           <label className="check-row">
             <input
               type="checkbox"
               checked={grouped}
+              disabled={busy}
               onChange={(e) => {
                 const value = e.target.checked;
                 setGrouped(value);
@@ -724,13 +734,24 @@ export function IssuesPage(c: Context) {
               {preview.skipped.length} skipped; {preview.groups.length} worker
               job{preview.groups.length === 1 ? "" : "s"}.
               <br />
-              Repositories: {preview.repositories.join(", ") || "none"}; GitHub
-              identities:{" "}
-              {preview.identities
-                .map((login: string) => "@" + login)
-                .join(", ") || "none"}
-              ; estimated work: unlimited application budget (provider and
-              infrastructure limits still apply).
+              <ul>
+                {preview.groups.map((group: string[]) => {
+                  const issue = preview.eligible.find(
+                    (item: any) => item.id === group[0],
+                  );
+                  const login = c.data.identities.find(
+                    (account: any) => account.id === issue?.identityId,
+                  )?.login;
+                  return (
+                    <li key={group[0]}>
+                      {issue?.repo} ·{" "}
+                      {login ? `@${login}` : "GitHub account unavailable"} ·{" "}
+                      {group.length} {group.length === 1 ? "issue" : "issues"}
+                    </li>
+                  );
+                })}
+              </ul>
+              {preview.worker.reason || preview.sandbox.reason}
               {preview.skipped.length > 0 && (
                 <ul>
                   {preview.skipped.slice(0, 6).map((item: any) => (
@@ -758,9 +779,18 @@ export function IssuesPage(c: Context) {
             <Button variant="secondary" onClick={() => setConfirm(false)}>
               Cancel
             </Button>
-            <Button busy={busy} onClick={() => void solve()}>
+            <Button
+              busy={busy}
+              disabled={
+                !preview?.eligible.length ||
+                !preview.worker.available ||
+                !preview.sandbox.available
+              }
+              onClick={() => void solve()}
+            >
               <Play size={15} />
-              Start {selected.length} issues
+              Start {preview?.groups.length ?? 0}{" "}
+              {preview?.groups.length === 1 ? "run" : "runs"}
             </Button>
           </div>
         </Modal>
@@ -772,6 +802,38 @@ export function RunsPage(c: Context) {
   const [query, setQuery] = useState(""),
     [status, setStatus] = useState(""),
     [repo, setRepo] = useState("");
+  const { allowance, settings } = c.data;
+  const monthlyUsage = c.data.usage.reduce(
+    (total: number, day: { total: number }) => total + day.total,
+    0,
+  );
+  const allowanceLeft =
+    allowance &&
+    Math.max(
+      0,
+      Math.min(
+        settings.monthlyTokens - allowance.total,
+        c.data.limits.tokens - monthlyUsage,
+      ),
+    );
+  const statuses = [
+    "",
+    "queued",
+    "running",
+    "awaiting_review",
+    "published",
+    "completed",
+    "planned",
+    "blocked",
+    "failed",
+    "cancelled",
+  ];
+  const repositoryRuns = c.data.runs.filter(
+    (run: any) => !repo || run.repo === repo,
+  );
+  const counts = new Map<string, number>();
+  for (const run of repositoryRuns)
+    counts.set(run.status, (counts.get(run.status) ?? 0) + 1);
   const runs = c.data.runs.filter(
     (r: any) =>
       (!status || r.status === status) &&
@@ -785,6 +847,18 @@ export function RunsPage(c: Context) {
         title="Every run. Every step."
         description="Follow your agents, inspect their work, and decide what ships."
       />
+      {allowance && (
+        <div className="subtle-notice">
+          <Zap size={16} />
+          <span>
+            AI allowance for chat and interactive tools:{" "}
+            {allowanceLeft.toLocaleString()} tokens left
+            {" · "}Workspace allowance resets{" "}
+            {new Date(allowance.reset).toLocaleString()}
+          </span>
+          <a href="/usage">AI usage</a>
+        </div>
+      )}
       <div className="filters">
         <SearchBox
           value={query}
@@ -796,20 +870,10 @@ export function RunsPage(c: Context) {
           aria-label="Run status"
           onChange={(e) => setStatus(e.target.value)}
         >
-          <option value="">All statuses</option>
-          {[
-            "queued",
-            "running",
-            "awaiting_review",
-            "published",
-            "completed",
-            "planned",
-            "blocked",
-            "failed",
-            "cancelled",
-          ].map((s) => (
+          {statuses.map((s) => (
             <option value={s} key={s}>
-              {label(s)}
+              {s ? label(s) : "All statuses"} (
+              {s ? (counts.get(s) ?? 0) : repositoryRuns.length})
             </option>
           ))}
         </Select>
@@ -905,7 +969,10 @@ export function RunPage(c: Context & { runId: string }) {
   useEffect(() => {
     const load = () =>
       request(`runs/${c.runId}`)
-        .then(setRun)
+        .then((loaded) => {
+          setRun(loaded);
+          setError("");
+        })
         .catch((e) => setError(e.message));
     void load();
     const t = setInterval(() => void load(), 3000);
@@ -925,7 +992,7 @@ export function RunPage(c: Context & { runId: string }) {
       setBusy(false);
     }
   };
-  if (error) return <Empty title={error} />;
+  if (error && !run) return <Empty title={error} />;
   if (!run)
     return (
       <div className="loading-state">
@@ -982,9 +1049,41 @@ export function RunPage(c: Context & { runId: string }) {
           </>
         }
       />
-      {run.error && (
+      {run.pending && (
+        <div role="status" className="subtle-notice">
+          <Clock size={16} />
+          <span>
+            {run.pending.error ||
+              (run.pending.kind === "publish"
+                ? "Waiting for the worker to publish this pull request."
+                : "Waiting for a worker to pick up this run.")}{" "}
+            {new Date(run.pending.availableAt).getTime() > Date.now()
+              ? `Next attempt eligible at ${new Date(run.pending.availableAt).toLocaleString()}.`
+              : ""}{" "}
+            EasySolve will pick it up automatically.
+          </span>
+        </div>
+      )}
+      {run.stage === "ai_wait" && (
+        <div role="status" className="subtle-notice">
+          Waiting for AI request capacity. EasySolve will continue from the
+          current step automatically.
+        </div>
+      )}
+      {run.error && !run.pending && (
         <div role="alert" className="alert">
           {run.error}
+        </div>
+      )}
+      {run.diff && ["blocked", "failed"].includes(run.status) && (
+        <div className="subtle-notice">
+          There are saved partial changes.{" "}
+          <button
+            className="button secondary small"
+            onClick={() => setTab("diff")}
+          >
+            View diff
+          </button>
         </div>
       )}
       <div className="run-meta">
