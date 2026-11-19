@@ -7,6 +7,7 @@ import { HttpError } from "./security";
 export type RunSelectionOptions = {
   grouped?: boolean;
   requireWorker?: boolean;
+  expectedIdentities?: ReadonlyMap<string, string>;
 };
 
 type SelectionIssue = {
@@ -256,6 +257,17 @@ export async function startRunsDetailed(
       preview.eligible.map((i) => i.id),
       options,
     );
+    if (
+      options.expectedIdentities &&
+      current.eligible.some(
+        (issue) =>
+          options.expectedIdentities?.get(issue.id) !== issue.identityId,
+      )
+    )
+      throw new HttpError(
+        409,
+        "A GitHub account changed since preview. Reopen the solve preview to confirm the account.",
+      );
     const runs = [];
     for (const batchIds of current.groups) {
       const batch = current.eligible.filter((i) => batchIds.includes(i.id));
