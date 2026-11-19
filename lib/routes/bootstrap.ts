@@ -119,7 +119,10 @@ export async function handleBootstrap({
         orderBy: { createdAt: "desc" },
       }),
       db.proposal.findMany({
-        where: { userId: u.id },
+        where: {
+          userId: u.id,
+          state: { notIn: ["issue_publishing", "issue_published"] },
+        },
         orderBy: { createdAt: "desc" },
         take: 20,
       }),
