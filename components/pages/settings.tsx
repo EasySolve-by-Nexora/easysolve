@@ -28,10 +28,57 @@ import {
 } from "../ui";
 import type { Context } from "../workspace";
 import { Identity, PageHead } from "../workspace";
+type IssueDraft = { key: string; title: string; body: string };
+
 export function RepositoriesPage(c: Context) {
   const [repo, setRepo] = useState(""),
     [busy, setBusy] = useState(false),
     [remove, setRemove] = useState<any>(null);
+  const [draftRepo, setDraftRepo] = useState<{
+    id: string;
+    fullName: string;
+  } | null>(null);
+  const [drafts, setDrafts] = useState<IssueDraft[]>([]);
+  const [selectedDraft, setSelectedDraft] = useState<IssueDraft | null>(null);
+  const [draftBusy, setDraftBusy] = useState(false);
+  const [published, setPublished] = useState<{ url: string; number: number }[]>(
+    [],
+  );
+  async function generateDrafts(repository: { id: string; fullName: string }) {
+    setDraftBusy(true);
+    try {
+      const response = await c.act(
+        `repositories/${repository.id}/draft-issues`,
+        {},
+      );
+      setDraftRepo(repository);
+      setDrafts(response.drafts);
+      setPublished([]);
+    } catch {
+      // The workspace displays the request error.
+    } finally {
+      setDraftBusy(false);
+    }
+  }
+  async function publishDraft() {
+    if (!selectedDraft || !draftRepo) return;
+    setDraftBusy(true);
+    try {
+      const result = await c.act(
+        `repositories/${draftRepo.id}/publish-issue`,
+        selectedDraft,
+      );
+      setPublished((items) => [...items, result]);
+      setDrafts((items) =>
+        items.filter((draft) => draft.key !== selectedDraft.key),
+      );
+      setSelectedDraft(null);
+    } catch {
+      // Keep the unsent draft available for review.
+    } finally {
+      setDraftBusy(false);
+    }
+  }
   return (
     <>
       <PageHead
@@ -119,6 +166,13 @@ export function RepositoriesPage(c: Context) {
                   Sync health
                 </Button>
                 <Badge status={r.health} />
+                <Button
+                  variant="secondary small"
+                  busy={draftBusy}
+                  onClick={() => void generateDrafts(r)}
+                >
+                  Generate issues
+                </Button>
                 <button
                   className="icon-button"
                   title="Remove from EasySolve"
@@ -139,6 +193,91 @@ export function RepositoriesPage(c: Context) {
             and review contributions.
           </Empty>
         </Panel>
+      )}
+      {draftRepo && (
+        <Panel
+          title={`Issue drafts for ${draftRepo.fullName}`}
+          description="Review each draft before publishing it to GitHub."
+        >
+          {drafts.length === 0 && published.length === 0 && (
+            <p>No drafts were suggested for this repository.</p>
+          )}
+          {drafts.map((draft) => (
+            <div className="repository-row" key={draft.key}>
+              <strong>{draft.title}</strong>
+              <Button
+                variant="secondary small"
+                disabled={draftBusy}
+                onClick={() => setSelectedDraft(draft)}
+              >
+                Review draft
+              </Button>
+            </div>
+          ))}
+          {published.map((issue) => (
+            <p key={issue.number}>
+              <External href={issue.url}>
+                View published issue #{issue.number}
+              </External>
+            </p>
+          ))}
+        </Panel>
+      )}
+      {selectedDraft && (
+        <Modal
+          title="Review GitHub issue draft"
+          onClose={() => {
+            if (!draftBusy) setSelectedDraft(null);
+          }}
+        >
+          <p>This publishes one issue to {draftRepo?.fullName}.</p>
+          <Field label="Title">
+            <input
+              maxLength={200}
+              value={selectedDraft.title}
+              disabled={draftBusy}
+              onChange={(e) =>
+                setSelectedDraft({ ...selectedDraft, title: e.target.value })
+              }
+            />
+          </Field>
+          <Field label="Description">
+            <textarea
+              rows={10}
+              maxLength={8000}
+              value={selectedDraft.body}
+              disabled={draftBusy}
+              onChange={(e) =>
+                setSelectedDraft({ ...selectedDraft, body: e.target.value })
+              }
+            />
+          </Field>
+          <div className="modal-actions">
+            <Button
+              variant="secondary"
+              disabled={draftBusy}
+              onClick={() => {
+                setDrafts((items) =>
+                  items.map((draft) =>
+                    draft.key === selectedDraft.key ? selectedDraft : draft,
+                  ),
+                );
+                setSelectedDraft(null);
+              }}
+            >
+              Save draft edits
+            </Button>
+            <Button
+              busy={draftBusy}
+              disabled={
+                !selectedDraft.title.trim() || !selectedDraft.body.trim()
+              }
+              onClick={() => void publishDraft()}
+            >
+              Publish issue on GitHub
+            </Button>
+          </div>
+        </Modal>
       )}
       <div className="subtle-notice">
         <ShieldCheck size={16} />
