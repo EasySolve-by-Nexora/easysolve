@@ -65,10 +65,18 @@ async function waitForAIRequestSlots(
     { key: `ai:${userId}`, limit: limit("AI_REQUESTS_PER_MINUTE", 20) },
     { key: "ai:global", limit: limit("AI_GLOBAL_REQUESTS_PER_MINUTE", 60) },
   ];
+  let previousStage: string | undefined;
   for (;;) {
     signal?.throwIfAborted();
     const retryAt = await reserveAIRequestSlots(buckets);
-    if (!retryAt) return;
+    if (!retryAt) {
+      if (previousStage && runId)
+        await db.run.updateMany({
+          where: { id: runId, userId, status: "running", stage: "ai_wait" },
+          data: { stage: previousStage, lastProgressAt: new Date() },
+        });
+      return;
+    }
     if (!runId)
       throw Object.assign(
         new HttpError(
@@ -80,6 +88,18 @@ async function waitForAIRequestSlots(
         },
       );
 
+    if (previousStage === undefined) {
+      const run = await db.run.findFirst({
+        where: { id: runId, userId, status: "running" },
+        select: { stage: true },
+      });
+      if (!run) throw Error("Run cancelled");
+      previousStage = run.stage === "ai_wait" ? "execution" : run.stage;
+      await db.run.updateMany({
+        where: { id: runId, userId, status: "running", stage: run.stage },
+        data: { stage: "ai_wait", lastProgressAt: new Date() },
+      });
+    }
     // Keep the current sandbox and transcript while waiting for capacity.
     const resumeAt = retryAt.getTime() + 25 + Math.floor(Math.random() * 175);
     while (Date.now() < resumeAt) {
